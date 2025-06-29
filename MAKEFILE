@@ -1,0 +1,45 @@
+.PHONY: dev build test clean docker-up docker-down
+
+# Development
+dev:
+	./scripts/dev.sh
+
+run:
+	go run cmd/server/main.go
+
+# Build
+build:
+	./scripts/build.sh
+
+# Testing
+test:
+	./scripts/test.sh
+
+# Docker
+docker-up:
+	cd docker && docker-compose up -d
+
+docker-down:
+	cd docker && docker-compose down
+
+docker-logs:
+	cd docker && docker-compose logs -f
+
+# Cleanup
+clean:
+	rm -rf dist/
+	rm -f coverage.out coverage.html
+
+# Dependencies
+deps:
+	go mod tidy
+	go mod download
+
+# Database
+migrate-up:
+	@echo "Running migrations..."
+	# Add migration commands here
+
+migrate-down:
+	@echo "Rolling back migrations..."
+	# Add rollback commands here
