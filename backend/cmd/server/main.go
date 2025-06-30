@@ -1,27 +1,80 @@
+// backend/cmd/seed/main.go
 package main
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"flag"
+	"fmt"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
-	"os/signal"
-	"syscall"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Ayash-Bera/ophelia/backend/internal/alchemyst"
-	"github.com/Ayash-Bera/ophelia/backend/internal/api/handlers"
 	"github.com/Ayash-Bera/ophelia/backend/internal/config"
 	"github.com/Ayash-Bera/ophelia/backend/internal/database"
-	"github.com/Ayash-Bera/ophelia/backend/internal/health"
+	"github.com/Ayash-Bera/ophelia/backend/internal/models"
 	"github.com/Ayash-Bera/ophelia/backend/internal/repository"
-	"github.com/Ayash-Bera/ophelia/backend/internal/services"
 	"github.com/Ayash-Bera/ophelia/backend/pkg/utils"
-	"github.com/gin-gonic/gin"
+	"github.com/gocolly/colly/v2"
+	"github.com/gocolly/colly/v2/debug"
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
+)
+
+// WikiPageConfig represents configuration for a wiki page
+type WikiPageConfig struct {
+	Title    string
+	URL      string
+	Priority int // Higher priority pages are processed first
+	Sections []string // Specific sections to extract (empty = all)
+}
+
+// ContentSeeder handles wiki content scraping and seeding
+type ContentSeeder struct {
+	collector        *colly.Collector
+	alchemystService *alchemyst.Service
+	repoManager      *repository.RepositoryManager
+	logger           *logrus.Logger
+	processed        map[string]bool
+	errors           []error
+}
+
+var (
+	// High-priority Arch Wiki pages with common troubleshooting content
+	ArchWikiPages = []WikiPageConfig{
+		{Title: "General_troubleshooting", Priority: 10, URL: "https://wiki.archlinux.org/title/General_troubleshooting"},
+		{Title: "Pacman/Troubleshooting", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman/Troubleshooting"},
+		{Title: "NetworkManager", Priority: 8, URL: "https://wiki.archlinux.org/title/NetworkManager"},
+		{Title: "Systemd", Priority: 8, URL: "https://wiki.archlinux.org/title/Systemd"},
+		{Title: "GRUB", Priority: 7, URL: "https://wiki.archlinux.org/title/GRUB"},
+		{Title: "NVIDIA/Troubleshooting", Priority: 7, URL: "https://wiki.archlinux.org/title/NVIDIA/Troubleshooting"},
+		{Title: "Steam/Troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/Steam/Troubleshooting"},
+		{Title: "Xorg", Priority: 6, URL: "https://wiki.archlinux.org/title/Xorg"},
+		{Title: "Audio_system", Priority: 6, URL: "https://wiki.archlinux.org/title/Audio_system"},
+		{Title: "Installation_guide", Priority: 5, URL: "https://wiki.archlinux.org/title/Installation_guide"},
+		{Title: "Kernel_parameters", Priority: 5, URL: "https://wiki.archlinux.org/title/Kernel_parameters"},
+		{Title: "Fstab", Priority: 5, URL: "https://wiki.archlinux.org/title/Fstab"},
+		{Title: "System_maintenance", Priority: 4, URL: "https://wiki.archlinux.org/title/System_maintenance"},
+		{Title: "Bluetooth", Priority: 4, URL: "https://wiki.archlinux.org/title/Bluetooth"},
+		{Title: "PulseAudio/Troubleshooting", Priority: 4, URL: "https://wiki.archlinux.org/title/PulseAudio/Troubleshooting"},
+	}
+
+	// Command line flags
+	dryRun     = flag.Bool("dry-run", false, "Don't upload to Alchemyst, just print what would be uploaded")
+	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
+	pageLimit  = flag.Int("limit", 0, "Limit number of pages to process (0 = all)")
+	concurrent = flag.Int("concurrent", 2, "Number of concurrent requests")
+	delay      = flag.Duration("delay", 2*time.Second, "Delay between requests")
 )
 
 func main() {
+	flag.Parse()
+
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
 		log.Printf("No .env file found: %v", err)
@@ -29,6 +82,11 @@ func main() {
 
 	// Initialize logger
 	logger := utils.GetLogger()
+	if *verbose {
+		logger.SetLevel(logrus.DebugLevel)
+	}
+
+	logger.Info("Starting Arch Wiki content seeder...")
 
 	// Load configuration
 	cfg, err := config.Load()
@@ -36,281 +94,410 @@ func main() {
 		logger.WithError(err).Fatal("Failed to load configuration")
 	}
 
-	// Validate Alchemyst configuration
-	if err := cfg.ValidateAlchemyst(); err != nil {
-		logger.WithError(err).Fatal("Alchemyst configuration validation failed")
-	}
+	var alchemystService *alchemyst.Service
+	var repoManager *repository.RepositoryManager
 
-	// Initialize database manager
-	dbConfig := &database.Config{
-		DatabaseURL: cfg.Database.URL,
-		RedisURL:    cfg.Redis.URL,
-		LogLevel:    os.Getenv("LOG_LEVEL"),
-	}
-
-	dbManager, err := database.NewManager(dbConfig, logger)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to initialize database manager")
-	}
-	defer dbManager.Close()
-
-	// Run migrations
-	if err := dbManager.Migrate(); err != nil {
-		logger.WithError(err).Fatal("Failed to run migrations")
-	}
-
-	// Initialize repositories
-	repoManager := repository.NewRepositoryManager(dbManager.DB)
-
-	// Initialize cache
-	cache := database.NewCache(dbManager.Redis, logger)
-
-	// Initialize Alchemyst client and service
-	alchemystClient := alchemyst.NewClient(cfg.Alchemyst.BaseURL, cfg.Alchemyst.APIKey, logger)
-	alchemystService := alchemyst.NewService(alchemystClient, logger)
-
-	// Initialize search service
-	searchService := services.NewSearchService(alchemystService, repoManager, logger)
-
-	// Initialize health checker
-	healthChecker := health.NewHealthChecker(dbManager, repoManager.SystemHealth, logger, cfg.Alchemyst.BaseURL)
-
-	// Initialize handlers
-	searchHandler := handlers.NewSearchHandler(searchService, repoManager, cache, logger)
-
-	// Set Gin mode
-	if os.Getenv("GIN_MODE") == "release" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
-	// Initialize Gin router
-	r := gin.New()
-
-	// Add middleware
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
-
-	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Session-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
+	if !*dryRun {
+		// Validate Alchemyst configuration
+		if err := cfg.ValidateAlchemyst(); err != nil {
+			logger.WithError(err).Fatal("Alchemyst configuration validation failed")
 		}
 
-		c.Next()
-	})
-
-	// Request logging middleware
-	r.Use(func(c *gin.Context) {
-		start := time.Now()
-		c.Next()
-		
-		logger.WithFields(map[string]interface{}{
-			"method":      c.Request.Method,
-			"path":        c.Request.URL.Path,
-			"status":      c.Writer.Status(),
-			"duration":    time.Since(start).Milliseconds(),
-			"ip":          c.ClientIP(),
-			"user_agent":  c.GetHeader("User-Agent"),
-		}).Info("Request processed")
-	})
-
-	// Health check endpoints
-	r.GET("/health", func(c *gin.Context) {
-		health := healthChecker.CheckAll()
-		statusCode := http.StatusOK
-		if health.Status != "healthy" {
-			statusCode = http.StatusServiceUnavailable
+		// Initialize database for tracking
+		dbConfig := &database.Config{
+			DatabaseURL: cfg.Database.URL,
+			RedisURL:    cfg.Redis.URL,
+			LogLevel:    os.Getenv("LOG_LEVEL"),
 		}
-		c.JSON(statusCode, health)
-	})
 
-	r.GET("/health/cached", func(c *gin.Context) {
-		health, err := healthChecker.CheckCached(c.Request.Context())
+		dbManager, err := database.NewManager(dbConfig, logger)
 		if err != nil {
-			utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get cached health status", err)
-			return
+			logger.WithError(err).Fatal("Failed to initialize database manager")
 		}
-		statusCode := http.StatusOK
-		if health.Status != "healthy" {
-			statusCode = http.StatusServiceUnavailable
-		}
-		c.JSON(statusCode, health)
-	})
+		defer dbManager.Close()
 
-	r.GET("/health/:service", func(c *gin.Context) {
-		service := c.Param("service")
-		var serviceHealth health.ServiceHealth
-		
-		switch service {
-		case "postgresql":
-			serviceHealth = healthChecker.CheckPostgreSQL()
-		case "redis":
-			serviceHealth = healthChecker.CheckRedis()
-		case "alchemyst":
-			serviceHealth = healthChecker.CheckAlchemyst()
-		default:
-			utils.ErrorResponse(c, http.StatusNotFound, "Service not found", nil)
-			return
-		}
+		repoManager = repository.NewRepositoryManager(dbManager.DB)
 
-		statusCode := http.StatusOK
-		if serviceHealth.Status != "healthy" {
-			statusCode = http.StatusServiceUnavailable
-		}
-		c.JSON(statusCode, serviceHealth)
-	})
-
-	// Statistics endpoints
-	r.GET("/stats/db", func(c *gin.Context) {
-		sqlDB, err := dbManager.DB.DB()
-		if err != nil {
-			utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get database stats", err)
-			return
-		}
-
-		stats := sqlDB.Stats()
-		utils.SuccessResponse(c, http.StatusOK, "Database statistics", map[string]interface{}{
-			"open_connections":       stats.OpenConnections,
-			"in_use":                stats.InUse,
-			"idle":                  stats.Idle,
-			"wait_count":            stats.WaitCount,
-			"wait_duration":         stats.WaitDuration.String(),
-			"max_idle_closed":       stats.MaxIdleClosed,
-			"max_idle_time_closed":  stats.MaxIdleTimeClosed,
-			"max_lifetime_closed":   stats.MaxLifetimeClosed,
-		})
-	})
-
-	r.GET("/stats/cache", func(c *gin.Context) {
-		stats, err := cache.GetCacheStats(c.Request.Context())
-		if err != nil {
-			utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get cache stats", err)
-			return
-		}
-		utils.SuccessResponse(c, http.StatusOK, "Cache statistics", stats)
-	})
-
-	// API routes group
-	api := r.Group("/api/v1")
-	{
-		// Search endpoints
-		api.POST("/search", searchHandler.HandleSearch)
-		api.POST("/feedback", searchHandler.HandleFeedback)
-		api.GET("/suggestions", searchHandler.HandleSearchSuggestions)
-
-		// Analytics endpoints
-		api.GET("/analytics/popular", func(c *gin.Context) {
-			queries, err := repoManager.PopularQuery.GetTop(10)
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get popular queries", err)
-				return
-			}
-			utils.SuccessResponse(c, http.StatusOK, "Popular queries retrieved", queries)
-		})
-
-		api.GET("/analytics/recent", func(c *gin.Context) {
-			searches, err := repoManager.SearchQuery.GetRecentSearches(20)
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get recent searches", err)
-				return
-			}
-			utils.SuccessResponse(c, http.StatusOK, "Recent searches retrieved", searches)
-		})
-
-		api.GET("/analytics/feedback", func(c *gin.Context) {
-			feedback, err := repoManager.UserFeedback.GetRecentFeedback(20)
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get recent feedback", err)
-				return
-			}
-			utils.SuccessResponse(c, http.StatusOK, "Recent feedback retrieved", feedback)
-		})
-
-		// Content management endpoints
-		api.GET("/content", func(c *gin.Context) {
-			content, err := repoManager.ContentMetadata.GetActive()
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get content", err)
-				return
-			}
-			utils.SuccessResponse(c, http.StatusOK, "Content retrieved", content)
-		})
-
-		api.GET("/content/:title", func(c *gin.Context) {
-			title := c.Param("title")
-			content, err := repoManager.ContentMetadata.GetByTitle(title)
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusNotFound, "Content not found", err)
-				return
-			}
-			utils.SuccessResponse(c, http.StatusOK, "Content retrieved", content)
-		})
-
-		// Admin endpoints (in a real app, these would be protected)
-		admin := api.Group("/admin")
-		{
-			admin.GET("/health-history", func(c *gin.Context) {
-				healthData, err := repoManager.SystemHealth.GetAllServicesHealth()
-				if err != nil {
-					utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get health history", err)
-					return
-				}
-				utils.SuccessResponse(c, http.StatusOK, "Health history retrieved", healthData)
-			})
-
-			admin.POST("/cache/clear", func(c *gin.Context) {
-				if err := cache.ClearAllCache(c.Request.Context()); err != nil {
-					utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to clear cache", err)
-					return
-				}
-				utils.SuccessResponse(c, http.StatusOK, "Cache cleared successfully", nil)
-			})
-		}
+		// Initialize Alchemyst client and service
+		alchemystClient := alchemyst.NewClient(cfg.Alchemyst.BaseURL, cfg.Alchemyst.APIKey, logger)
+		alchemystService = alchemyst.NewService(alchemystClient, logger)
 	}
 
-	// Start periodic health checks
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Create content seeder
+	seeder := NewContentSeeder(alchemystService, repoManager, logger)
+
+	// Process pages
+	ctx := context.Background()
+	if err := seeder.SeedContent(ctx); err != nil {
+		logger.WithError(err).Fatal("Content seeding failed")
+	}
+
+	logger.Info("Content seeding completed successfully!")
+}
+
+func NewContentSeeder(alchemystService *alchemyst.Service, repoManager *repository.RepositoryManager, logger *logrus.Logger) *ContentSeeder {
+	// Configure Colly collector
+	c := colly.NewCollector(
+		colly.UserAgent("ArchSearch-Bot/1.0 (+https://github.com/yourusername/arch-search)"),
+	)
+
+	// Enable debug mode if verbose
+	if *verbose {
+		c.Debugger = &debug.LogDebugger{}
+	}
+
+	// Configure limits and delays
+	c.Limit(&colly.LimitRule{
+		DomainGlob:  "wiki.archlinux.org",
+		Parallelism: *concurrent,
+		Delay:       *delay,
+	})
+
+	// Configure timeouts
+	c.SetRequestTimeout(30 * time.Second)
+
+	return &ContentSeeder{
+		collector:        c,
+		alchemystService: alchemystService,
+		repoManager:      repoManager,
+		logger:           logger,
+		processed:        make(map[string]bool),
+		errors:           make([]error, 0),
+	}
+}
+
+func (cs *ContentSeeder) SeedContent(ctx context.Context) error {
+	cs.logger.Info("Starting content seeding process...")
+
+	// Sort pages by priority
+	pages := make([]WikiPageConfig, len(ArchWikiPages))
+	copy(pages, ArchWikiPages)
 	
-	go healthChecker.PeriodicHealthCheck(ctx, 30*time.Second)
-
-	// Setup graceful shutdown
-	srv := &http.Server{
-		Addr:         ":" + cfg.Server.Port,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Start server in a goroutine
-	go func() {
-		logger.WithField("port", cfg.Server.Port).Info("Server starting")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.WithError(err).Fatal("Failed to start server")
+	// Sort by priority (descending)
+	for i := 0; i < len(pages)-1; i++ {
+		for j := i + 1; j < len(pages); j++ {
+			if pages[i].Priority < pages[j].Priority {
+				pages[i], pages[j] = pages[j], pages[i]
+			}
 		}
-	}()
-
-	// Wait for interrupt signal to gracefully shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	logger.Info("Server shutting down...")
-
-	// Graceful shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.WithError(err).Fatal("Server forced to shutdown")
 	}
 
-	logger.Info("Server exited")
+	// Apply page limit if specified
+	if *pageLimit > 0 && *pageLimit < len(pages) {
+		pages = pages[:*pageLimit]
+		cs.logger.WithField("limit", *pageLimit).Info("Limited pages to process")
+	}
+
+	cs.logger.WithField("total_pages", len(pages)).Info("Processing wiki pages")
+
+	// Process each page
+	for i, page := range pages {
+		cs.logger.WithFields(logrus.Fields{
+			"page":     page.Title,
+			"priority": page.Priority,
+			"progress": fmt.Sprintf("%d/%d", i+1, len(pages)),
+		}).Info("Processing page")
+
+		if err := cs.processPage(ctx, page); err != nil {
+			cs.logger.WithError(err).WithField("page", page.Title).Error("Failed to process page")
+			cs.errors = append(cs.errors, fmt.Errorf("failed to process %s: %w", page.Title, err))
+			continue
+		}
+
+		cs.processed[page.Title] = true
+		cs.logger.WithField("page", page.Title).Info("Page processed successfully")
+
+		// Small delay between pages
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Report results
+	cs.logger.WithFields(logrus.Fields{
+		"processed": len(cs.processed),
+		"errors":    len(cs.errors),
+	}).Info("Content seeding completed")
+
+	if len(cs.errors) > 0 {
+		cs.logger.Warn("Some pages failed to process:")
+		for _, err := range cs.errors {
+			cs.logger.WithError(err).Warn("Processing error")
+		}
+	}
+
+	return nil
+}
+
+func (cs *ContentSeeder) processPage(ctx context.Context, page WikiPageConfig) error {
+	var content string
+	var extractedSections []WikiSection
+	var processingError error
+
+	// Configure collector for this specific page
+	cs.collector.OnHTML("#mw-content-text", func(e *colly.HTMLElement) {
+		// Extract main content
+		content = cs.extractPageContent(e)
+		
+		// Extract sections
+		extractedSections = cs.extractSections(e, page.Title)
+		
+		cs.logger.WithFields(logrus.Fields{
+			"page":     page.Title,
+			"content_length": len(content),
+			"sections": len(extractedSections),
+		}).Debug("Content extracted")
+	})
+
+	cs.collector.OnError(func(r *colly.Response, err error) {
+		processingError = err
+	})
+
+	// Visit the page
+	err := cs.collector.Visit(page.URL)
+	if err != nil {
+		return fmt.Errorf("failed to visit page: %w", err)
+	}
+
+	if processingError != nil {
+		return fmt.Errorf("processing error: %w", processingError)
+	}
+
+	if content == "" {
+		return fmt.Errorf("no content extracted from page")
+	}
+
+	// Extract error patterns
+	errorPatterns := cs.extractErrorPatterns(content)
+	
+	// Create content hash
+	contentHash := cs.createContentHash(content)
+
+	// Update database record if not in dry-run mode
+	if !*dryRun && cs.repoManager != nil {
+		if err := cs.updateContentMetadata(page, contentHash, errorPatterns, len(extractedSections)); err != nil {
+			cs.logger.WithError(err).Warn("Failed to update content metadata")
+		}
+	}
+
+	if *dryRun {
+		cs.logger.WithFields(logrus.Fields{
+			"page":           page.Title,
+			"content_length": len(content),
+			"sections":       len(extractedSections),
+			"error_patterns": len(errorPatterns),
+			"hash":           contentHash[:8],
+		}).Info("DRY RUN: Would upload content")
+		return nil
+	}
+
+	// Upload main content to Alchemyst
+	if err := cs.uploadToAlchemyst(ctx, page.Title, content, page.URL); err != nil {
+		return fmt.Errorf("failed to upload main content: %w", err)
+	}
+
+	// Upload sections separately for better search granularity
+	for i, section := range extractedSections {
+		sectionTitle := fmt.Sprintf("%s/%s", page.Title, section.Title)
+		if err := cs.uploadToAlchemyst(ctx, sectionTitle, section.Content, page.URL+"#"+section.Anchor); err != nil {
+			cs.logger.WithError(err).WithField("section", sectionTitle).Warn("Failed to upload section")
+			continue
+		}
+		
+		// Log progress for long pages
+		if len(extractedSections) > 10 && i%5 == 0 {
+			cs.logger.WithFields(logrus.Fields{
+				"page":     page.Title,
+				"progress": fmt.Sprintf("%d/%d", i+1, len(extractedSections)),
+			}).Debug("Section upload progress")
+		}
+	}
+
+	return nil
+}
+
+// WikiSection represents a section of a wiki page
+type WikiSection struct {
+	Title   string
+	Content string
+	Anchor  string
+	Level   int
+}
+
+func (cs *ContentSeeder) extractPageContent(e *colly.HTMLElement) string {
+	// Remove unwanted elements
+	e.DOM.Find(".navbox, .infobox, .ambox, .toc, .printfooter, .catlinks").Remove()
+	e.DOM.Find("#toc, .noprint, .editlink, .mw-editsection").Remove()
+	
+	// Get text content
+	text := strings.TrimSpace(e.DOM.Text())
+	
+	// Clean up whitespace
+	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`\n\s*\n`).ReplaceAllString(text, "\n\n")
+	
+	return text
+}
+
+func (cs *ContentSeeder) extractSections(e *colly.HTMLElement, pageTitle string) []WikiSection {
+	var sections []WikiSection
+	
+	e.DOM.Find("h2, h3, h4").Each(func(i int, h *colly.HTMLElement) {
+		// Get section title
+		titleText := strings.TrimSpace(h.DOM.Find(".mw-headline").Text())
+		if titleText == "" {
+			return
+		}
+
+		// Get anchor
+		anchor := ""
+		if id, exists := h.DOM.Find(".mw-headline").Attr("id"); exists {
+			anchor = id
+		}
+
+		// Get section level
+		level := 2 // default
+		switch h.Name {
+		case "h2":
+			level = 2
+		case "h3":
+			level = 3
+		case "h4":
+			level = 4
+		}
+
+		// Get section content (until next heading)
+		var content strings.Builder
+		
+		// Find all siblings until next heading
+		h.DOM.NextUntil("h2, h3, h4").Each(func(j int, s *colly.HTMLElement) {
+			// Skip certain elements
+			if s.Name == "table" || s.DOM.HasClass("navbox") || s.DOM.HasClass("ambox") {
+				return
+			}
+			
+			text := strings.TrimSpace(s.DOM.Text())
+			if text != "" {
+				content.WriteString(text + "\n")
+			}
+		})
+
+		sectionContent := strings.TrimSpace(content.String())
+		
+		// Only include sections with substantial content
+		if len(sectionContent) > 50 {
+			sections = append(sections, WikiSection{
+				Title:   titleText,
+				Content: sectionContent,
+				Anchor:  anchor,
+				Level:   level,
+			})
+		}
+	})
+
+	cs.logger.WithFields(logrus.Fields{
+		"page":     pageTitle,
+		"sections": len(sections),
+	}).Debug("Extracted sections")
+
+	return sections
+}
+
+func (cs *ContentSeeder) extractErrorPatterns(content string) []string {
+	patterns := make(map[string]bool)
+	
+	// Common error patterns in Arch Linux
+	errorRegexes := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)error[:\s]+[a-zA-Z0-9\s\-\._/]+`),
+		regexp.MustCompile(`(?i)failed[:\s]+[a-zA-Z0-9\s\-\._/]+`),
+		regexp.MustCompile(`(?i)cannot[:\s]+[a-zA-Z0-9\s\-\._/]+`),
+		regexp.MustCompile(`(?i)unable to[:\s]+[a-zA-Z0-9\s\-\._/]+`),
+		regexp.MustCompile(`(?i)permission denied[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)no such file or directory[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)command not found[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)segmentation fault[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)kernel panic[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)dependency.*conflict[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)package.*not found[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+		regexp.MustCompile(`(?i)service.*failed[:\s]*[a-zA-Z0-9\s\-\._/]*`),
+	}
+
+	// Extract patterns
+	for _, regex := range errorRegexes {
+		matches := regex.FindAllString(content, -1)
+		for _, match := range matches {
+			// Clean and normalize the pattern
+			pattern := strings.TrimSpace(match)
+			pattern = regexp.MustCompile(`\s+`).ReplaceAllString(pattern, " ")
+			
+			if len(pattern) > 5 && len(pattern) < 100 {
+				patterns[strings.ToLower(pattern)] = true
+			}
+		}
+	}
+
+	// Convert to slice
+	var result []string
+	for pattern := range patterns {
+		result = append(result, pattern)
+	}
+
+	return result
+}
+
+func (cs *ContentSeeder) createContentHash(content string) string {
+	hash := md5.Sum([]byte(content))
+	return hex.EncodeToString(hash[:])
+}
+
+func (cs *ContentSeeder) updateContentMetadata(page WikiPageConfig, contentHash string, errorPatterns []string, sectionCount int) error {
+	// Convert string slice to StringArray
+	var patterns models.StringArray = errorPatterns
+
+	contentMetadata := &models.ContentMetadata{
+		WikiPageTitle:  page.Title,
+		ContentHash:    contentHash,
+		PageURL:        page.URL,
+		ErrorPatterns:  patterns,
+		WordCount:      cs.estimateWordCount(contentHash),
+		SectionCount:   sectionCount,
+		LastCrawled:    &time.Time{},
+		CrawlStatus:    "completed",
+		IsActive:       true,
+	}
+
+	// Try to update existing record first
+	existing, err := cs.repoManager.ContentMetadata.GetByTitle(page.Title)
+	if err == nil {
+		// Update existing
+		existing.ContentHash = contentHash
+		existing.ErrorPatterns = patterns
+		existing.WordCount = contentMetadata.WordCount
+		existing.SectionCount = sectionCount
+		existing.LastCrawled = &time.Time{}
+		existing.CrawlStatus = "completed"
+		
+		return cs.repoManager.ContentMetadata.Update(existing)
+	}
+
+	// Create new record
+	return cs.repoManager.ContentMetadata.Create(contentMetadata)
+}
+
+func (cs *ContentSeeder) estimateWordCount(contentHash string) int {
+	// Simple estimation based on hash - not accurate but consistent
+	// In a real implementation, you'd count words in the content
+	return len(contentHash) * 50 // Rough estimation
+}
+
+func (cs *ContentSeeder) uploadToAlchemyst(ctx context.Context, title, content, wikiURL string) error {
+	if cs.alchemystService == nil {
+		return fmt.Errorf("alchemyst service not initialized")
+	}
+
+	cs.logger.WithFields(logrus.Fields{
+		"title":          title,
+		"content_length": len(content),
+		"url":            wikiURL,
+	}).Debug("Uploading to Alchemyst")
+
+	return cs.alchemystService.AddWikiContent(ctx, title, content, wikiURL)
 }

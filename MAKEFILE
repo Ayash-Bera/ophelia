@@ -1,4 +1,4 @@
-.PHONY: dev build test clean docker-up docker-down
+.PHONY: dev build test clean docker-up docker-down seed-test seed-sample seed-full
 
 # Development
 dev:
@@ -11,9 +11,31 @@ run:
 build:
 	./scripts/build.sh
 
+build-seeder:
+	go build -o dist/arch-search-seeder cmd/seed/main.go
+
 # Testing
 test:
 	./scripts/test.sh
+
+test-day5:
+	./scripts/day5_test.sh
+
+# Content Seeding
+seed-test:
+	./scripts/seeding_utility.sh test
+
+seed-sample:
+	./scripts/seeding_utility.sh seed-sample
+
+seed-full:
+	./scripts/seeding_utility.sh seed
+
+seed-status:
+	./scripts/seeding_utility.sh status
+
+seed-clean:
+	./scripts/seeding_utility.sh clean
 
 # Docker
 docker-up:
@@ -29,6 +51,7 @@ docker-logs:
 clean:
 	rm -rf dist/
 	rm -f coverage.out coverage.html
+	rm -rf logs/
 
 # Dependencies
 deps:
@@ -38,8 +61,22 @@ deps:
 # Database
 migrate-up:
 	@echo "Running migrations..."
-	# Add migration commands here
+	go run cmd/server/main.go --migrate-only
 
 migrate-down:
 	@echo "Rolling back migrations..."
 	# Add rollback commands here
+
+# Day 5 specific commands
+day5-setup: deps build-seeder docker-up
+	@echo "Day 5 setup complete!"
+	@echo "Run 'make seed-test' to test the seeder"
+
+day5-demo: seed-test
+	@echo "Starting demo server..."
+	go run cmd/server/main.go &
+	@echo "Test search: curl -X POST http://localhost:8080/api/v1/search -H 'Content-Type: application/json' -d '{\"query\": \"pacman error\"}'"
+
+# Full Day 5 testing workflow
+day5-validate: build test-day5 seed-test
+	@echo "🎉 Day 5 validation complete!"
