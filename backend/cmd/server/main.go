@@ -9,11 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ayash-Bera/ophelia/backend/internal/alchemyst"
+	"github.com/Ayash-Bera/ophelia/backend/internal/api/handlers"
 	"github.com/Ayash-Bera/ophelia/backend/internal/config"
 	"github.com/Ayash-Bera/ophelia/backend/internal/database"
 	"github.com/Ayash-Bera/ophelia/backend/internal/health"
-	"github.com/Ayash-Bera/ophelia/backend/internal/migration"
 	"github.com/Ayash-Bera/ophelia/backend/internal/repository"
+	"github.com/Ayash-Bera/ophelia/backend/internal/services"
 	"github.com/Ayash-Bera/ophelia/backend/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -34,6 +36,11 @@ func main() {
 		logger.WithError(err).Fatal("Failed to load configuration")
 	}
 
+	// Validate Alchemyst configuration
+	if err := cfg.ValidateAlchemyst(); err != nil {
+		logger.WithError(err).Fatal("Alchemyst configuration validation failed")
+	}
+
 	// Initialize database manager
 	dbConfig := &database.Config{
 		DatabaseURL: cfg.Database.URL,
@@ -48,30 +55,46 @@ func main() {
 	defer dbManager.Close()
 
 	// Run migrations
-	migrationRunner := migration.NewRunner(dbManager, logger)
-	if err := migrationRunner.RunMigrations("./migrations"); err != nil {
+	if err := dbManager.Migrate(); err != nil {
 		logger.WithError(err).Fatal("Failed to run migrations")
 	}
 
 	// Initialize repositories
 	repoManager := repository.NewRepositoryManager(dbManager.DB)
 
+	// Initialize cache
+	cache := database.NewCache(dbManager.Redis, logger)
+
+	// Initialize Alchemyst client and service
+	alchemystClient := alchemyst.NewClient(cfg.Alchemyst.BaseURL, cfg.Alchemyst.APIKey, logger)
+	alchemystService := alchemyst.NewService(alchemystClient, logger)
+
+	// Initialize search service
+	searchService := services.NewSearchService(alchemystService, repoManager, logger)
+
 	// Initialize health checker
 	healthChecker := health.NewHealthChecker(dbManager, repoManager.SystemHealth, logger, cfg.Alchemyst.BaseURL)
 
-	// Verify Day 3 setup
-	if err := health.VerifyDay3Setup(dbManager, repoManager, logger); err != nil {
-		logger.WithError(err).Fatal("Day 3 setup verification failed")
+	// Initialize handlers
+	searchHandler := handlers.NewSearchHandler(searchService, repoManager, cache, logger)
+
+	// Set Gin mode
+	if os.Getenv("GIN_MODE") == "release" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	// Initialize Gin router
-	r := gin.Default()
+	r := gin.New()
+
+	// Add middleware
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Session-ID")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
@@ -80,6 +103,21 @@ func main() {
 		}
 
 		c.Next()
+	})
+
+	// Request logging middleware
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		
+		logger.WithFields(map[string]interface{}{
+			"method":      c.Request.Method,
+			"path":        c.Request.URL.Path,
+			"status":      c.Writer.Status(),
+			"duration":    time.Since(start).Milliseconds(),
+			"ip":          c.ClientIP(),
+			"user_agent":  c.GetHeader("User-Agent"),
+		}).Info("Request processed")
 	})
 
 	// Health check endpoints
@@ -108,7 +146,7 @@ func main() {
 	r.GET("/health/:service", func(c *gin.Context) {
 		service := c.Param("service")
 		var serviceHealth health.ServiceHealth
-
+		
 		switch service {
 		case "postgresql":
 			serviceHealth = healthChecker.CheckPostgreSQL()
@@ -128,7 +166,7 @@ func main() {
 		c.JSON(statusCode, serviceHealth)
 	})
 
-	// Database statistics endpoint
+	// Statistics endpoints
 	r.GET("/stats/db", func(c *gin.Context) {
 		sqlDB, err := dbManager.DB.DB()
 		if err != nil {
@@ -138,20 +176,18 @@ func main() {
 
 		stats := sqlDB.Stats()
 		utils.SuccessResponse(c, http.StatusOK, "Database statistics", map[string]interface{}{
-			"open_connections":     stats.OpenConnections,
-			"in_use":               stats.InUse,
-			"idle":                 stats.Idle,
-			"wait_count":           stats.WaitCount,
-			"wait_duration":        stats.WaitDuration.String(),
-			"max_idle_closed":      stats.MaxIdleClosed,
-			"max_idle_time_closed": stats.MaxIdleTimeClosed,
-			"max_lifetime_closed":  stats.MaxLifetimeClosed,
+			"open_connections":       stats.OpenConnections,
+			"in_use":                stats.InUse,
+			"idle":                  stats.Idle,
+			"wait_count":            stats.WaitCount,
+			"wait_duration":         stats.WaitDuration.String(),
+			"max_idle_closed":       stats.MaxIdleClosed,
+			"max_idle_time_closed":  stats.MaxIdleTimeClosed,
+			"max_lifetime_closed":   stats.MaxLifetimeClosed,
 		})
 	})
 
-	// Cache statistics endpoint
 	r.GET("/stats/cache", func(c *gin.Context) {
-		cache := database.NewCache(dbManager.Redis, logger)
 		stats, err := cache.GetCacheStats(c.Request.Context())
 		if err != nil {
 			utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get cache stats", err)
@@ -163,10 +199,10 @@ func main() {
 	// API routes group
 	api := r.Group("/api/v1")
 	{
-		// Search endpoint (placeholder for Day 4)
-		api.POST("/search", func(c *gin.Context) {
-			utils.SuccessResponse(c, http.StatusOK, "Search endpoint ready - implementation coming in Day 4", nil)
-		})
+		// Search endpoints
+		api.POST("/search", searchHandler.HandleSearch)
+		api.POST("/feedback", searchHandler.HandleFeedback)
+		api.GET("/suggestions", searchHandler.HandleSearchSuggestions)
 
 		// Analytics endpoints
 		api.GET("/analytics/popular", func(c *gin.Context) {
@@ -185,6 +221,15 @@ func main() {
 				return
 			}
 			utils.SuccessResponse(c, http.StatusOK, "Recent searches retrieved", searches)
+		})
+
+		api.GET("/analytics/feedback", func(c *gin.Context) {
+			feedback, err := repoManager.UserFeedback.GetRecentFeedback(20)
+			if err != nil {
+				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get recent feedback", err)
+				return
+			}
+			utils.SuccessResponse(c, http.StatusOK, "Recent feedback retrieved", feedback)
 		})
 
 		// Content management endpoints
@@ -206,18 +251,42 @@ func main() {
 			}
 			utils.SuccessResponse(c, http.StatusOK, "Content retrieved", content)
 		})
+
+		// Admin endpoints (in a real app, these would be protected)
+		admin := api.Group("/admin")
+		{
+			admin.GET("/health-history", func(c *gin.Context) {
+				healthData, err := repoManager.SystemHealth.GetAllServicesHealth()
+				if err != nil {
+					utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get health history", err)
+					return
+				}
+				utils.SuccessResponse(c, http.StatusOK, "Health history retrieved", healthData)
+			})
+
+			admin.POST("/cache/clear", func(c *gin.Context) {
+				if err := cache.ClearAllCache(c.Request.Context()); err != nil {
+					utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to clear cache", err)
+					return
+				}
+				utils.SuccessResponse(c, http.StatusOK, "Cache cleared successfully", nil)
+			})
+		}
 	}
 
 	// Start periodic health checks
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
+	
 	go healthChecker.PeriodicHealthCheck(ctx, 30*time.Second)
 
 	// Setup graceful shutdown
 	srv := &http.Server{
-		Addr:    ":" + cfg.Server.Port,
-		Handler: r,
+		Addr:         ":" + cfg.Server.Port,
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start server in a goroutine
