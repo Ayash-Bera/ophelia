@@ -1,4 +1,4 @@
--- Enhanced database schema for Arch Search System
+-- Simplified database schema for Arch Search System
 -- Migration: 001_initial_schema.sql
 
 -- Search analytics table
@@ -94,45 +94,19 @@ CREATE TABLE IF NOT EXISTS system_health (
     checked_at TIMESTAMP DEFAULT NOW()
 );
 
--- Create indexes for performance
+-- Create basic indexes for performance
 CREATE INDEX IF NOT EXISTS idx_search_queries_timestamp ON search_queries(search_timestamp);
 CREATE INDEX IF NOT EXISTS idx_search_queries_session ON search_queries(user_session);
-CREATE INDEX IF NOT EXISTS idx_search_queries_text_gin ON search_queries USING gin(to_tsvector('english', query_text));
-
 CREATE INDEX IF NOT EXISTS idx_content_metadata_title ON content_metadata(wiki_page_title);
 CREATE INDEX IF NOT EXISTS idx_content_metadata_updated ON content_metadata(last_updated);
 CREATE INDEX IF NOT EXISTS idx_content_metadata_active ON content_metadata(is_active);
 CREATE INDEX IF NOT EXISTS idx_content_metadata_status ON content_metadata(crawl_status);
-
 CREATE INDEX IF NOT EXISTS idx_user_feedback_query ON user_feedback(query_id);
 CREATE INDEX IF NOT EXISTS idx_user_feedback_type ON user_feedback(feedback_type);
-CREATE INDEX IF NOT EXISTS idx_user_feedback_session ON user_feedback(user_session);
-
 CREATE INDEX IF NOT EXISTS idx_wiki_sections_metadata ON wiki_sections(content_metadata_id);
-CREATE INDEX IF NOT EXISTS idx_wiki_sections_order ON wiki_sections(content_metadata_id, section_order);
-
 CREATE INDEX IF NOT EXISTS idx_search_analytics_date ON search_analytics(date_hour);
 CREATE INDEX IF NOT EXISTS idx_popular_queries_count ON popular_queries(search_count DESC);
-CREATE INDEX IF NOT EXISTS idx_popular_queries_last_searched ON popular_queries(last_searched);
-
 CREATE INDEX IF NOT EXISTS idx_system_health_service ON system_health(service_name);
-CREATE INDEX IF NOT EXISTS idx_system_health_checked ON system_health(checked_at);
-
--- Create functions for auto-updating timestamps
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Create triggers for auto-updating timestamps
-CREATE TRIGGER update_search_queries_updated_at BEFORE UPDATE ON search_queries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_user_feedback_updated_at BEFORE UPDATE ON user_feedback FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_content_metadata_updated_at BEFORE UPDATE ON content_metadata FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_popular_queries_updated_at BEFORE UPDATE ON popular_queries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_wiki_sections_updated_at BEFORE UPDATE ON wiki_sections FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert initial system health data
 INSERT INTO system_health (service_name, status, response_time_ms) VALUES 

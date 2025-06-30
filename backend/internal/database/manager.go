@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Ayash-Bera/ophelia/backend/internal/models"
@@ -11,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // Database connection manager
@@ -31,20 +34,20 @@ type Config struct {
 // NewManager creates a new database manager with connection pooling
 func NewManager(config *Config, logger *logrus.Logger) (*Manager, error) {
 	// Configure GORM logger
-	var gormLogger logger.Interface
+	var gormLogger gormlogger.Interface
 	switch config.LogLevel {
 	case "debug":
-		gormLogger = logger.New(
-			logger.NewGormLogger(logger),
-			logger.Config{
+		gormLogger = gormlogger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			gormlogger.Config{
 				SlowThreshold:             200 * time.Millisecond,
-				LogLevel:                  logger.Info,
+				LogLevel:                  gormlogger.Info,
 				IgnoreRecordNotFoundError: true,
 				Colorful:                  false,
 			},
 		)
 	default:
-		gormLogger = logger.Default.LogMode(logger.Silent)
+		gormLogger = gormlogger.Default.LogMode(gormlogger.Silent)
 	}
 
 	// Open database connection with pooling

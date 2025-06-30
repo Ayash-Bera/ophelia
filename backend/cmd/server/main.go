@@ -12,6 +12,7 @@ import (
 	"github.com/Ayash-Bera/ophelia/backend/internal/config"
 	"github.com/Ayash-Bera/ophelia/backend/internal/database"
 	"github.com/Ayash-Bera/ophelia/backend/internal/health"
+	"github.com/Ayash-Bera/ophelia/backend/internal/migration"
 	"github.com/Ayash-Bera/ophelia/backend/internal/repository"
 	"github.com/Ayash-Bera/ophelia/backend/pkg/utils"
 	"github.com/gin-gonic/gin"
@@ -107,7 +108,7 @@ func main() {
 	r.GET("/health/:service", func(c *gin.Context) {
 		service := c.Param("service")
 		var serviceHealth health.ServiceHealth
-		
+
 		switch service {
 		case "postgresql":
 			serviceHealth = healthChecker.CheckPostgreSQL()
@@ -138,13 +139,13 @@ func main() {
 		stats := sqlDB.Stats()
 		utils.SuccessResponse(c, http.StatusOK, "Database statistics", map[string]interface{}{
 			"open_connections":     stats.OpenConnections,
-			"in_use":              stats.InUse,
-			"idle":                stats.Idle,
-			"wait_count":          stats.WaitCount,
-			"wait_duration":       stats.WaitDuration.String(),
-			"max_idle_closed":     stats.MaxIdleClosed,
+			"in_use":               stats.InUse,
+			"idle":                 stats.Idle,
+			"wait_count":           stats.WaitCount,
+			"wait_duration":        stats.WaitDuration.String(),
+			"max_idle_closed":      stats.MaxIdleClosed,
 			"max_idle_time_closed": stats.MaxIdleTimeClosed,
-			"max_lifetime_closed": stats.MaxLifetimeClosed,
+			"max_lifetime_closed":  stats.MaxLifetimeClosed,
 		})
 	})
 
@@ -210,7 +211,7 @@ func main() {
 	// Start periodic health checks
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	go healthChecker.PeriodicHealthCheck(ctx, 30*time.Second)
 
 	// Setup graceful shutdown

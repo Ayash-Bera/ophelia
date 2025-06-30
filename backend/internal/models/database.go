@@ -1,10 +1,9 @@
 package models
 
-// GORM models 
+// GORM models
 
 import (
 	"database/sql/driver"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ func (s *StringArray) Scan(value interface{}) error {
 		*s = StringArray{}
 		return nil
 	}
-	
+
 	switch v := value.(type) {
 	case string:
 		if v == "{}" {
@@ -59,15 +58,15 @@ type BaseModel struct {
 // SearchQuery represents search analytics
 type SearchQuery struct {
 	BaseModel
-	QueryText        string     `json:"query_text" gorm:"not null"`
-	UserSession      string     `json:"user_session"`
-	ResultsCount     int        `json:"results_count" gorm:"default:0"`
-	ClickedResultID  *string    `json:"clicked_result_id"`
-	SearchTimestamp  time.Time  `json:"search_timestamp" gorm:"default:NOW()"`
-	ResponseTimeMs   int        `json:"response_time_ms"`
-	UserAgent        string     `json:"user_agent"`
-	IPAddress        string     `json:"ip_address" gorm:"type:inet"`
-	
+	QueryText       string    `json:"query_text" gorm:"not null"`
+	UserSession     string    `json:"user_session"`
+	ResultsCount    int       `json:"results_count" gorm:"default:0"`
+	ClickedResultID *string   `json:"clicked_result_id"`
+	SearchTimestamp time.Time `json:"search_timestamp" gorm:"default:NOW()"`
+	ResponseTimeMs  int       `json:"response_time_ms"`
+	UserAgent       string    `json:"user_agent"`
+	IPAddress       string    `json:"ip_address" gorm:"type:inet"`
+
 	// Associations
 	Feedback []UserFeedback `json:"feedback" gorm:"foreignKey:QueryID"`
 }
@@ -79,7 +78,7 @@ type UserFeedback struct {
 	FeedbackType string `json:"feedback_type" gorm:"not null;check:feedback_type IN ('helpful','not_helpful','partially_helpful')"`
 	FeedbackText string `json:"feedback_text"`
 	UserSession  string `json:"user_session"`
-	
+
 	// Associations
 	Query SearchQuery `json:"query" gorm:"foreignKey:QueryID"`
 }
@@ -87,19 +86,19 @@ type UserFeedback struct {
 // ContentMetadata represents cached wiki page metadata
 type ContentMetadata struct {
 	BaseModel
-	WikiPageTitle       string      `json:"wiki_page_title" gorm:"unique;not null"`
-	AlchemystContextID  *string     `json:"alchemyst_context_id"`
-	ErrorPatterns       StringArray `json:"error_patterns" gorm:"type:text[]"`
-	ContentHash         string      `json:"content_hash"`
-	PageURL             string      `json:"page_url"`
-	ContentType         string      `json:"content_type" gorm:"default:'wiki_page'"`
-	LastCrawled         *time.Time  `json:"last_crawled"`
-	LastUpdated         time.Time   `json:"last_updated" gorm:"default:NOW()"`
-	IsActive            bool        `json:"is_active" gorm:"default:true"`
-	CrawlStatus         string      `json:"crawl_status" gorm:"default:'pending';check:crawl_status IN ('pending','crawling','completed','failed')"`
-	WordCount           int         `json:"word_count"`
-	SectionCount        int         `json:"section_count"`
-	
+	WikiPageTitle      string      `json:"wiki_page_title" gorm:"unique;not null"`
+	AlchemystContextID *string     `json:"alchemyst_context_id"`
+	ErrorPatterns      StringArray `json:"error_patterns" gorm:"type:text[]"`
+	ContentHash        string      `json:"content_hash"`
+	PageURL            string      `json:"page_url"`
+	ContentType        string      `json:"content_type" gorm:"default:'wiki_page'"`
+	LastCrawled        *time.Time  `json:"last_crawled"`
+	LastUpdated        time.Time   `json:"last_updated" gorm:"default:NOW()"`
+	IsActive           bool        `json:"is_active" gorm:"default:true"`
+	CrawlStatus        string      `json:"crawl_status" gorm:"default:'pending';check:crawl_status IN ('pending','crawling','completed','failed')"`
+	WordCount          int         `json:"word_count"`
+	SectionCount       int         `json:"section_count"`
+
 	// Associations
 	Sections []WikiSection `json:"sections" gorm:"foreignKey:ContentMetadataID"`
 }
@@ -107,13 +106,13 @@ type ContentMetadata struct {
 // WikiSection represents individual sections of wiki pages
 type WikiSection struct {
 	BaseModel
-	ContentMetadataID   uint        `json:"content_metadata_id" gorm:"not null"`
-	SectionTitle        string      `json:"section_title" gorm:"not null"`
-	SectionContent      string      `json:"section_content" gorm:"not null"`
-	SectionOrder        int         `json:"section_order" gorm:"not null"`
-	AlchemystContextID  *string     `json:"alchemyst_context_id"`
-	ErrorPatterns       StringArray `json:"error_patterns" gorm:"type:text[]"`
-	
+	ContentMetadataID  uint        `json:"content_metadata_id" gorm:"not null"`
+	SectionTitle       string      `json:"section_title" gorm:"not null"`
+	SectionContent     string      `json:"section_content" gorm:"not null"`
+	SectionOrder       int         `json:"section_order" gorm:"not null"`
+	AlchemystContextID *string     `json:"alchemyst_context_id"`
+	ErrorPatterns      StringArray `json:"error_patterns" gorm:"type:text[]"`
+
 	// Associations
 	ContentMetadata ContentMetadata `json:"content_metadata" gorm:"foreignKey:ContentMetadataID"`
 }
@@ -133,11 +132,11 @@ type SearchAnalytics struct {
 // PopularQuery represents frequently searched terms
 type PopularQuery struct {
 	BaseModel
-	QueryText          string    `json:"query_text" gorm:"unique;not null"`
-	SearchCount        int       `json:"search_count" gorm:"default:1"`
-	AvgResultsCount    float64   `json:"avg_results_count" gorm:"type:decimal(5,2);default:0"`
-	AvgResponseTimeMs  int       `json:"avg_response_time_ms" gorm:"default:0"`
-	LastSearched       time.Time `json:"last_searched" gorm:"default:NOW()"`
+	QueryText         string    `json:"query_text" gorm:"unique;not null"`
+	SearchCount       int       `json:"search_count" gorm:"default:1"`
+	AvgResultsCount   float64   `json:"avg_results_count" gorm:"type:decimal(5,2);default:0"`
+	AvgResponseTimeMs int       `json:"avg_response_time_ms" gorm:"default:0"`
+	LastSearched      time.Time `json:"last_searched" gorm:"default:NOW()"`
 }
 
 // SystemHealth represents service health monitoring

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	// "strings"
 	"time"
 
 	"github.com/Ayash-Bera/ophelia/backend/internal/database"
@@ -237,83 +238,6 @@ func (h *HealthChecker) PeriodicHealthCheck(ctx context.Context, interval time.D
 			h.logger.WithField("status", health.Status).Debug("Periodic health check completed")
 		}
 	}
-}
-
-// Migration runner
-package migration
-
-import (
-	"io/ioutil"
-	"path/filepath"
-	"sort"
-	"strings"
-
-	"github.com/Ayash-Bera/ophelia/backend/internal/database"
-	"github.com/sirupsen/logrus"
-)
-
-type Runner struct {
-	dbManager *database.Manager
-	logger    *logrus.Logger
-}
-
-func NewRunner(dbManager *database.Manager, logger *logrus.Logger) *Runner {
-	return &Runner{
-		dbManager: dbManager,
-		logger:    logger,
-	}
-}
-
-// RunMigrations executes all pending migrations
-func (r *Runner) RunMigrations(migrationsPath string) error {
-	r.logger.Info("Starting database migrations...")
-
-	// First run GORM auto-migrations
-	if err := r.dbManager.Migrate(); err != nil {
-		return fmt.Errorf("GORM auto-migration failed: %w", err)
-	}
-
-	// Then run SQL migrations
-	if err := r.runSQLMigrations(migrationsPath); err != nil {
-		return fmt.Errorf("SQL migrations failed: %w", err)
-	}
-
-	r.logger.Info("Database migrations completed successfully")
-	return nil
-}
-
-func (r *Runner) runSQLMigrations(migrationsPath string) error {
-	files, err := ioutil.ReadDir(migrationsPath)
-	if err != nil {
-		return fmt.Errorf("failed to read migrations directory: %w", err)
-	}
-
-	var sqlFiles []string
-	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".sql") {
-			sqlFiles = append(sqlFiles, file.Name())
-		}
-	}
-
-	sort.Strings(sqlFiles) // Ensure migrations run in order
-
-	for _, fileName := range sqlFiles {
-		if err := r.runSQLFile(filepath.Join(migrationsPath, fileName)); err != nil {
-			return fmt.Errorf("failed to run migration %s: %w", fileName, err)
-		}
-		r.logger.WithField("file", fileName).Info("Migration executed successfully")
-	}
-
-	return nil
-}
-
-func (r *Runner) runSQLFile(filePath string) error {
-	content, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	return r.dbManager.DB.Exec(string(content)).Error
 }
 
 // Day 3 completion checker
