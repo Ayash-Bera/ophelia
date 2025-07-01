@@ -21,62 +21,45 @@ func NewService(client *Client, logger *logrus.Logger) *Service {
 }
 
 func (s *Service) AddWikiContent(ctx context.Context, title, content, url string) error {
-	// Calculate content size
 	contentSize := int64(len(content))
-
-	// Get current timestamp for lastModified
-	now := time.Now().Format(time.RFC3339)
-
+	now := time.Now()
+	timestamp := now.Format("20060102-150405")
+	fileName := fmt.Sprintf("%s-%s.txt", title, timestamp)
+	
 	// Delete existing content first
 	source := fmt.Sprintf("arch-wiki/%s", title)
 	deleteReq := DeleteContextRequest{
 		Source: source,
 		ByDoc:  true,
-		ByID:   false,
 	}
-	
-	// Ignore delete errors (content might not exist)
 	_ = s.client.DeleteContext(deleteReq)
+	
+	// Wait for delete to propagate
+	time.Sleep(2 * time.Second)
 	
 	req := AddContextRequest{
 		Documents: []Document{{
 			Content:      content,
-			FileName:     title + ".txt",
+			FileName:     fileName, // Unique filename
 			FileType:     "text/plain",
 			FileSize:     contentSize,
-			LastModified: now,
+			LastModified: now.Format(time.RFC3339),
 		}},
 		Source:      source,
 		ContextType: "resource",
 		Scope:       "internal",
-		Chained:     false,
 		Metadata: map[string]interface{}{
-			// Required fields that the API expects
-			"fileName":     title + ".txt",
+			"fileName":     fileName,
 			"fileSize":     contentSize,
 			"fileType":     "text/plain",
-			"lastModified": now,
-			// Additional metadata
-			"file_name":  title + ".txt",
-			"doc_type":   "text/plain",
-			"modalities": []string{"text"},
-			"size":       contentSize,
-			"wiki_title": title,
-			"wiki_url":   url,
-			"source":     "arch_linux_wiki",
-			"extracted":  now,
+			"lastModified": now.Format(time.RFC3339),
+			"modalities":   []string{"text"},
 		},
 	}
 
-	s.logger.WithFields(logrus.Fields{
-		"title":        title,
-		"content_size": contentSize,
-		"url":          url,
-		"source":       req.Source,
-	}).Debug("Preparing Alchemyst request")
-
 	return s.client.AddContextWithRetry(ctx, req)
 }
+
 
 func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]SearchResult, error) {
 	req := SearchRequest{
@@ -84,22 +67,16 @@ func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]S
 		SimilarityThreshold:        0.8,
 		MinimumSimilarityThreshold: 0.3,
 		Scope:                      "internal",
+		// Simplified metadata
 		Metadata: map[string]interface{}{
-			// Required fields for search
-			"size":       int64(len(errorQuery)),
-			"doc_type":   "text/plain",
-			"file_name":  "search_query.txt",
-			// Additional metadata
 			"search_type": "error_query",
 			"source":      "arch_search_system",
-			"modalities":  []string{"text"},
 		},
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"query":                        errorQuery,
-		"similarity_threshold":         req.SimilarityThreshold,
-		"minimum_similarity_threshold": req.MinimumSimilarityThreshold,
+		"query": errorQuery,
+		"scope": req.Scope,
 	}).Debug("Searching Alchemyst context")
 
 	response, err := s.client.SearchContextWithRetry(ctx, req)

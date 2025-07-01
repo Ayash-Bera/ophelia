@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+
 	// "net/url"
 	"os"
 	"regexp"
@@ -20,10 +21,10 @@ import (
 	"github.com/Ayash-Bera/ophelia/backend/internal/models"
 	"github.com/Ayash-Bera/ophelia/backend/internal/repository"
 	"github.com/Ayash-Bera/ophelia/backend/pkg/utils"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
-	"github.com/PuerkitoBio/goquery"
 )
 
 // WikiPageConfig represents configuration for a wiki page
@@ -55,21 +56,76 @@ type ContentSeeder struct {
 var (
 	// High-priority Arch Wiki pages with common troubleshooting content
 	ArchWikiPages = []WikiPageConfig{
+		// Core troubleshooting (Priority 10-9)
 		{Title: "General_troubleshooting", Priority: 10, URL: "https://wiki.archlinux.org/title/General_troubleshooting"},
-		{Title: "Pacman/Troubleshooting", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman/Troubleshooting"},
+		{Title: "Installation_guide", Priority: 10, URL: "https://wiki.archlinux.org/title/Installation_guide"},
+		{Title: "System_maintenance", Priority: 9, URL: "https://wiki.archlinux.org/title/System_maintenance"},
+
+		// Package management (Priority 9-8)
+		{Title: "Pacman", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman"},
+		// {Title: "Pacman_troubleshooting", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman/Troubleshooting"},
+		{Title: "AUR", Priority: 8, URL: "https://wiki.archlinux.org/title/Arch_User_Repository"},
+		{Title: "makepkg", Priority: 8, URL: "https://wiki.archlinux.org/title/Makepkg"},
+
+		// Network (Priority 8-7)
 		{Title: "NetworkManager", Priority: 8, URL: "https://wiki.archlinux.org/title/NetworkManager"},
-		{Title: "Systemd", Priority: 8, URL: "https://wiki.archlinux.org/title/Systemd"},
+		{Title: "Network_configuration", Priority: 7, URL: "https://wiki.archlinux.org/title/Network_configuration"},
+		{Title: "Wireless_network_configuration", Priority: 7, URL: "https://wiki.archlinux.org/title/Wireless_network_configuration"},
+		{Title: "OpenVPN", Priority: 6, URL: "https://wiki.archlinux.org/title/OpenVPN"},
+
+		// Graphics (Priority 8-6)
+		{Title: "Xorg", Priority: 8, URL: "https://wiki.archlinux.org/title/Xorg"},
+		{Title: "NVIDIA", Priority: 7, URL: "https://wiki.archlinux.org/title/NVIDIA"},
+		{Title: "NVIDIA_troubleshooting", Priority: 7, URL: "https://wiki.archlinux.org/title/NVIDIA/Troubleshooting"},
+		{Title: "AMDGPU", Priority: 7, URL: "https://wiki.archlinux.org/title/AMDGPU"},
+		{Title: "Intel_graphics", Priority: 6, URL: "https://wiki.archlinux.org/title/Intel_graphics"},
+		{Title: "Wayland", Priority: 6, URL: "https://wiki.archlinux.org/title/Wayland"},
+
+		// Audio (Priority 7-6)
+		{Title: "Advanced_Linux_Sound_Architecture", Priority: 7, URL: "https://wiki.archlinux.org/title/Advanced_Linux_Sound_Architecture"},
+		{Title: "PulseAudio", Priority: 6, URL: "https://wiki.archlinux.org/title/PulseAudio"},
+		{Title: "PulseAudio_troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/PulseAudio/Troubleshooting"},
+		{Title: "PipeWire", Priority: 6, URL: "https://wiki.archlinux.org/title/PipeWire"},
+
+		// Boot/System (Priority 7-6)
 		{Title: "GRUB", Priority: 7, URL: "https://wiki.archlinux.org/title/GRUB"},
-		{Title: "NVIDIA/Troubleshooting", Priority: 7, URL: "https://wiki.archlinux.org/title/NVIDIA/Troubleshooting"},
-		{Title: "Steam/Troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/Steam/Troubleshooting"},
-		{Title: "Xorg", Priority: 6, URL: "https://wiki.archlinux.org/title/Xorg"},
-		{Title: "Audio_system", Priority: 6, URL: "https://wiki.archlinux.org/title/Audio_system"},
-		{Title: "Installation_guide", Priority: 5, URL: "https://wiki.archlinux.org/title/Installation_guide"},
-		{Title: "Kernel_parameters", Priority: 5, URL: "https://wiki.archlinux.org/title/Kernel_parameters"},
-		{Title: "Fstab", Priority: 5, URL: "https://wiki.archlinux.org/title/Fstab"},
-		{Title: "System_maintenance", Priority: 4, URL: "https://wiki.archlinux.org/title/System_maintenance"},
-		{Title: "Bluetooth", Priority: 4, URL: "https://wiki.archlinux.org/title/Bluetooth"},
-		{Title: "PulseAudio/Troubleshooting", Priority: 4, URL: "https://wiki.archlinux.org/title/PulseAudio/Troubleshooting"},
+		{Title: "Systemd", Priority: 7, URL: "https://wiki.archlinux.org/title/Systemd"},
+		{Title: "Kernel_parameters", Priority: 6, URL: "https://wiki.archlinux.org/title/Kernel_parameters"},
+		{Title: "Fstab", Priority: 6, URL: "https://wiki.archlinux.org/title/Fstab"},
+		{Title: "Arch_boot_process", Priority: 6, URL: "https://wiki.archlinux.org/title/Arch_boot_process"},
+
+		// Hardware (Priority 6-5)
+		{Title: "Bluetooth", Priority: 6, URL: "https://wiki.archlinux.org/title/Bluetooth"},
+		{Title: "Power_management", Priority: 5, URL: "https://wiki.archlinux.org/title/Power_management"},
+		{Title: "Laptop", Priority: 5, URL: "https://wiki.archlinux.org/title/Laptop"},
+		{Title: "Hardware_video_acceleration", Priority: 5, URL: "https://wiki.archlinux.org/title/Hardware_video_acceleration"},
+
+		// Desktop Environments (Priority 6-5)
+		{Title: "GNOME", Priority: 6, URL: "https://wiki.archlinux.org/title/GNOME"},
+		{Title: "GNOME_troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/GNOME/Troubleshooting"},
+		{Title: "KDE", Priority: 5, URL: "https://wiki.archlinux.org/title/KDE"},
+		{Title: "Xfce", Priority: 5, URL: "https://wiki.archlinux.org/title/Xfce"},
+
+		// Gaming (Priority 5-4)
+		{Title: "Steam", Priority: 5, URL: "https://wiki.archlinux.org/title/Steam"},
+		{Title: "Steam_troubleshooting", Priority: 5, URL: "https://wiki.archlinux.org/title/Steam/Troubleshooting"},
+		{Title: "Gaming", Priority: 4, URL: "https://wiki.archlinux.org/title/Gaming"},
+
+		// Services & Virtualization (Priority 5-4)
+		{Title: "OpenSSH", Priority: 5, URL: "https://wiki.archlinux.org/title/OpenSSH"},
+		{Title: "Docker", Priority: 4, URL: "https://wiki.archlinux.org/title/Docker"},
+		{Title: "VirtualBox", Priority: 4, URL: "https://wiki.archlinux.org/title/VirtualBox"},
+
+		// Printing & Multimedia (Priority 4-3)
+		{Title: "CUPS", Priority: 4, URL: "https://wiki.archlinux.org/title/CUPS"},
+		{Title: "CUPS_troubleshooting", Priority: 4, URL: "https://wiki.archlinux.org/title/CUPS/Troubleshooting"},
+		{Title: "Firefox", Priority: 3, URL: "https://wiki.archlinux.org/title/Firefox"},
+		{Title: "Chromium", Priority: 3, URL: "https://wiki.archlinux.org/title/Chromium"},
+
+		// File Systems & Storage (Priority 4-3)
+		{Title: "File_systems", Priority: 4, URL: "https://wiki.archlinux.org/title/File_systems"},
+		{Title: "USB_storage_devices", Priority: 3, URL: "https://wiki.archlinux.org/title/USB_storage_devices"},
+		{Title: "Solid_state_drive", Priority: 3, URL: "https://wiki.archlinux.org/title/Solid_state_drive"},
 	}
 
 	// Command line flags
@@ -180,7 +236,7 @@ func (cs *ContentSeeder) SeedContent(ctx context.Context) error {
 	// Sort pages by priority
 	pages := make([]WikiPageConfig, len(ArchWikiPages))
 	copy(pages, ArchWikiPages)
-	
+
 	// Sort by priority (descending) - using a simple bubble sort for clarity
 	for i := 0; i < len(pages)-1; i++ {
 		for j := i + 1; j < len(pages); j++ {
@@ -235,19 +291,35 @@ func (cs *ContentSeeder) SeedContent(ctx context.Context) error {
 	return nil
 }
 
+// Fix in cmd/seed/main.go - processPage function
+
 func (cs *ContentSeeder) processPage(ctx context.Context, page WikiPageConfig) error {
 	var content string
 	var extractedSections []WikiSection
 	var processingError error
 
+	// Create a new collector for each page to avoid state issues
+	c := colly.NewCollector(
+		colly.UserAgent("ArchSearch-Bot/1.0 (+https://github.com/yourusername/arch-search)"),
+	)
+
+	// Configure limits and delays
+	c.Limit(&colly.LimitRule{
+		DomainGlob:  "wiki.archlinux.org",
+		Parallelism: 1, // Use 1 for individual page processing
+		Delay:       *delay,
+	})
+
+	c.SetRequestTimeout(30 * time.Second)
+
 	// Configure collector for this specific page
-	cs.collector.OnHTML("#mw-content-text", func(e *colly.HTMLElement) {
+	c.OnHTML("#mw-content-text", func(e *colly.HTMLElement) {
 		// Extract main content
 		content = cs.extractPageContent(e)
-		
+
 		// Extract sections
 		extractedSections = cs.extractSections(e, page.Title)
-		
+
 		cs.logger.WithFields(logrus.Fields{
 			"page":           page.Title,
 			"content_length": len(content),
@@ -255,12 +327,12 @@ func (cs *ContentSeeder) processPage(ctx context.Context, page WikiPageConfig) e
 		}).Debug("Content extracted")
 	})
 
-	cs.collector.OnError(func(r *colly.Response, err error) {
+	c.OnError(func(r *colly.Response, err error) {
 		processingError = err
 	})
 
 	// Visit the page
-	err := cs.collector.Visit(page.URL)
+	err := c.Visit(page.URL)
 	if err != nil {
 		return fmt.Errorf("failed to visit page: %w", err)
 	}
@@ -273,13 +345,10 @@ func (cs *ContentSeeder) processPage(ctx context.Context, page WikiPageConfig) e
 		return fmt.Errorf("no content extracted from page")
 	}
 
-	// Extract error patterns
+	// Rest of the function remains the same...
 	errorPatterns := cs.extractErrorPatterns(content)
-	
-	// Create content hash
 	contentHash := cs.createContentHash(content)
 
-	// Update database record if not in dry-run mode
 	if !*dryRun && cs.repoManager != nil {
 		if err := cs.updateContentMetadata(page, contentHash, errorPatterns, len(extractedSections), content); err != nil {
 			cs.logger.WithError(err).Warn("Failed to update content metadata")
@@ -309,7 +378,7 @@ func (cs *ContentSeeder) processPage(ctx context.Context, page WikiPageConfig) e
 			cs.logger.WithError(err).WithField("section", sectionTitle).Warn("Failed to upload section")
 			continue
 		}
-		
+
 		// Log progress for long pages
 		if len(extractedSections) > 10 && i%5 == 0 {
 			cs.logger.WithFields(logrus.Fields{
@@ -326,20 +395,20 @@ func (cs *ContentSeeder) extractPageContent(e *colly.HTMLElement) string {
 	// Remove unwanted elements
 	e.DOM.Find(".navbox, .infobox, .ambox, .toc, .printfooter, .catlinks").Remove()
 	e.DOM.Find("#toc, .noprint, .editlink, .mw-editsection").Remove()
-	
+
 	// Get text content
 	text := strings.TrimSpace(e.DOM.Text())
-	
+
 	// Clean up whitespace
 	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
 	text = regexp.MustCompile(`\n\s*\n`).ReplaceAllString(text, "\n\n")
-	
+
 	return text
 }
 
 func (cs *ContentSeeder) extractSections(e *colly.HTMLElement, pageTitle string) []WikiSection {
 	var sections []WikiSection
-	
+
 	e.DOM.Find("h2, h3, h4").Each(func(i int, selection *goquery.Selection) {
 		// Get section title
 		titleText := strings.TrimSpace(selection.Find(".mw-headline").Text())
@@ -367,14 +436,14 @@ func (cs *ContentSeeder) extractSections(e *colly.HTMLElement, pageTitle string)
 
 		// Get section content (find content until next heading)
 		var content strings.Builder
-		
+
 		// Navigate through siblings until we hit another heading
 		selection.NextUntil("h2, h3, h4").Each(func(j int, sibling *goquery.Selection) {
 			// Skip certain elements
 			if sibling.Is("table") || sibling.HasClass("navbox") || sibling.HasClass("ambox") {
 				return
 			}
-			
+
 			text := strings.TrimSpace(sibling.Text())
 			if text != "" {
 				content.WriteString(text + "\n")
@@ -382,7 +451,7 @@ func (cs *ContentSeeder) extractSections(e *colly.HTMLElement, pageTitle string)
 		})
 
 		sectionContent := strings.TrimSpace(content.String())
-		
+
 		// Only include sections with substantial content
 		if len(sectionContent) > 50 {
 			sections = append(sections, WikiSection{
@@ -404,7 +473,7 @@ func (cs *ContentSeeder) extractSections(e *colly.HTMLElement, pageTitle string)
 
 func (cs *ContentSeeder) extractErrorPatterns(content string) []string {
 	patterns := make(map[string]bool)
-	
+
 	// Common error patterns in Arch Linux
 	errorRegexes := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)error[:\s]+[a-zA-Z0-9\s\-\._/]+`),
@@ -428,7 +497,7 @@ func (cs *ContentSeeder) extractErrorPatterns(content string) []string {
 			// Clean and normalize the pattern
 			pattern := strings.TrimSpace(match)
 			pattern = regexp.MustCompile(`\s+`).ReplaceAllString(pattern, " ")
-			
+
 			if len(pattern) > 5 && len(pattern) < 100 {
 				patterns[strings.ToLower(pattern)] = true
 			}
@@ -457,15 +526,15 @@ func (cs *ContentSeeder) updateContentMetadata(page WikiPageConfig, contentHash 
 	now := time.Now()
 
 	contentMetadata := &models.ContentMetadata{
-		WikiPageTitle:  page.Title,
-		ContentHash:    contentHash,
-		PageURL:        page.URL,
-		ErrorPatterns:  patterns,
-		WordCount:      cs.estimateWordCount(content),
-		SectionCount:   sectionCount,
-		LastCrawled:    &now,
-		CrawlStatus:    "completed",
-		IsActive:       true,
+		WikiPageTitle: page.Title,
+		ContentHash:   contentHash,
+		PageURL:       page.URL,
+		ErrorPatterns: patterns,
+		WordCount:     cs.estimateWordCount(content),
+		SectionCount:  sectionCount,
+		LastCrawled:   &now,
+		CrawlStatus:   "completed",
+		IsActive:      true,
 	}
 
 	// Try to update existing record first
@@ -478,7 +547,7 @@ func (cs *ContentSeeder) updateContentMetadata(page WikiPageConfig, contentHash 
 		existing.SectionCount = sectionCount
 		existing.LastCrawled = &now
 		existing.CrawlStatus = "completed"
-		
+
 		return cs.repoManager.ContentMetadata.Update(existing)
 	}
 
