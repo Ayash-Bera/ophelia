@@ -24,23 +24,28 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	contentSize := int64(len(content))
 	now := time.Now()
 	timestamp := now.Format("20060102-150405")
-	fileName := fmt.Sprintf("%s-%s.txt", title, timestamp)
 	
-	// Delete existing content first
+	// Use unique filename with timestamp + random component
+	fileName := fmt.Sprintf("%s-%s-%d.txt", title, timestamp, now.UnixNano()%1000)
+	
+	// Simple deletion attempt (don't fail if it doesn't work)
 	source := fmt.Sprintf("arch-wiki/%s", title)
 	deleteReq := DeleteContextRequest{
 		Source: source,
 		ByDoc:  true,
 	}
-	_ = s.client.DeleteContext(deleteReq)
 	
-	// Wait for delete to propagate
-	time.Sleep(2 * time.Second)
+	if err := s.client.DeleteContext(deleteReq); err != nil {
+		s.logger.WithError(err).Debug("Delete failed, continuing with unique filename")
+	} else {
+		// Wait briefly for deletion to propagate
+		time.Sleep(3 * time.Second)
+	}
 	
 	req := AddContextRequest{
 		Documents: []Document{{
 			Content:      content,
-			FileName:     fileName, // Unique filename
+			FileName:     fileName,
 			FileType:     "text/plain",
 			FileSize:     contentSize,
 			LastModified: now.Format(time.RFC3339),
@@ -60,14 +65,12 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	return s.client.AddContextWithRetry(ctx, req)
 }
 
-
 func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]SearchResult, error) {
 	req := SearchRequest{
 		Query:                      errorQuery,
 		SimilarityThreshold:        0.8,
 		MinimumSimilarityThreshold: 0.3,
 		Scope:                      "internal",
-		// Simplified metadata
 		Metadata: map[string]interface{}{
 			"search_type": "error_query",
 			"source":      "arch_search_system",
