@@ -27,6 +27,17 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	// Get current timestamp for lastModified
 	now := time.Now().Format(time.RFC3339)
 
+	// Delete existing content first
+	source := fmt.Sprintf("arch-wiki/%s", title)
+	deleteReq := DeleteContextRequest{
+		Source: source,
+		ByDoc:  true,
+		ByID:   false,
+	}
+	
+	// Ignore delete errors (content might not exist)
+	_ = s.client.DeleteContext(deleteReq)
+	
 	req := AddContextRequest{
 		Documents: []Document{{
 			Content:      content,
@@ -35,7 +46,7 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 			FileSize:     contentSize,
 			LastModified: now,
 		}},
-		Source:      fmt.Sprintf("arch-wiki/%s", title),
+		Source:      source,
 		ContextType: "resource",
 		Scope:       "internal",
 		Chained:     false,
@@ -74,8 +85,14 @@ func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]S
 		MinimumSimilarityThreshold: 0.3,
 		Scope:                      "internal",
 		Metadata: map[string]interface{}{
+			// Required fields for search
+			"size":       int64(len(errorQuery)),
+			"doc_type":   "text/plain",
+			"file_name":  "search_query.txt",
+			// Additional metadata
 			"search_type": "error_query",
 			"source":      "arch_search_system",
+			"modalities":  []string{"text"},
 		},
 	}
 
