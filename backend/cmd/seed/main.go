@@ -60,19 +60,25 @@ var (
 		{Title: "General_troubleshooting", Priority: 10, URL: "https://wiki.archlinux.org/title/General_troubleshooting"},
 		{Title: "Installation_guide", Priority: 10, URL: "https://wiki.archlinux.org/title/Installation_guide"},
 		{Title: "System_maintenance", Priority: 9, URL: "https://wiki.archlinux.org/title/System_maintenance"},
-
+		{Title: "System_recovery", Priority: 9, URL: "https://wiki.archlinux.org/title/System_recovery"},
+		{Title: "Locale", Priority: 7, URL: "https://wiki.archlinux.org/title/Locale"},
+		{Title: "Time_zone", Priority: 6, URL: "https://wiki.archlinux.org/title/System_time#Time_zone"},
+		{Title: "Users_and_groups", Priority: 6, URL: "https://wiki.archlinux.org/title/Users_and_groups"},
+		
 		// Package management (Priority 9-8)
 		{Title: "Pacman", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman"},
 		// {Title: "Pacman_troubleshooting", Priority: 9, URL: "https://wiki.archlinux.org/title/Pacman/Troubleshooting"},
 		{Title: "AUR", Priority: 8, URL: "https://wiki.archlinux.org/title/Arch_User_Repository"},
 		{Title: "makepkg", Priority: 8, URL: "https://wiki.archlinux.org/title/Makepkg"},
-
+		
 		// Network (Priority 8-7)
+		{Title: "Hardware_video_acceleration", Priority: 7, URL: "https://wiki.archlinux.org/title/Hardware_video_acceleration"},
+		{Title: "Webcam_setup", Priority: 6, URL: "https://wiki.archlinux.org/title/Webcam_setup"},
 		{Title: "NetworkManager", Priority: 8, URL: "https://wiki.archlinux.org/title/NetworkManager"},
 		{Title: "Network_configuration", Priority: 7, URL: "https://wiki.archlinux.org/title/Network_configuration"},
 		{Title: "Wireless_network_configuration", Priority: 7, URL: "https://wiki.archlinux.org/title/Wireless_network_configuration"},
 		{Title: "OpenVPN", Priority: 6, URL: "https://wiki.archlinux.org/title/OpenVPN"},
-
+		
 		// Graphics (Priority 8-6)
 		{Title: "Xorg", Priority: 8, URL: "https://wiki.archlinux.org/title/Xorg"},
 		{Title: "NVIDIA", Priority: 7, URL: "https://wiki.archlinux.org/title/NVIDIA"},
@@ -80,33 +86,35 @@ var (
 		{Title: "AMDGPU", Priority: 7, URL: "https://wiki.archlinux.org/title/AMDGPU"},
 		{Title: "Intel_graphics", Priority: 6, URL: "https://wiki.archlinux.org/title/Intel_graphics"},
 		{Title: "Wayland", Priority: 6, URL: "https://wiki.archlinux.org/title/Wayland"},
-
+		
 		// Audio (Priority 7-6)
 		{Title: "Advanced_Linux_Sound_Architecture", Priority: 7, URL: "https://wiki.archlinux.org/title/Advanced_Linux_Sound_Architecture"},
 		{Title: "PulseAudio", Priority: 6, URL: "https://wiki.archlinux.org/title/PulseAudio"},
 		{Title: "PulseAudio_troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/PulseAudio/Troubleshooting"},
 		{Title: "PipeWire", Priority: 6, URL: "https://wiki.archlinux.org/title/PipeWire"},
-
+		
 		// Boot/System (Priority 7-6)
 		{Title: "GRUB", Priority: 7, URL: "https://wiki.archlinux.org/title/GRUB"},
 		{Title: "Systemd", Priority: 7, URL: "https://wiki.archlinux.org/title/Systemd"},
 		{Title: "Kernel_parameters", Priority: 6, URL: "https://wiki.archlinux.org/title/Kernel_parameters"},
 		{Title: "Fstab", Priority: 6, URL: "https://wiki.archlinux.org/title/Fstab"},
 		{Title: "Arch_boot_process", Priority: 6, URL: "https://wiki.archlinux.org/title/Arch_boot_process"},
-
+		
 		// Hardware (Priority 6-5)
 		{Title: "Bluetooth", Priority: 6, URL: "https://wiki.archlinux.org/title/Bluetooth"},
 		{Title: "Power_management", Priority: 5, URL: "https://wiki.archlinux.org/title/Power_management"},
 		{Title: "Laptop", Priority: 5, URL: "https://wiki.archlinux.org/title/Laptop"},
 		{Title: "Hardware_video_acceleration", Priority: 5, URL: "https://wiki.archlinux.org/title/Hardware_video_acceleration"},
-
+		
 		// Desktop Environments (Priority 6-5)
 		{Title: "GNOME", Priority: 6, URL: "https://wiki.archlinux.org/title/GNOME"},
 		{Title: "GNOME_troubleshooting", Priority: 6, URL: "https://wiki.archlinux.org/title/GNOME/Troubleshooting"},
 		{Title: "KDE", Priority: 5, URL: "https://wiki.archlinux.org/title/KDE"},
 		{Title: "Xfce", Priority: 5, URL: "https://wiki.archlinux.org/title/Xfce"},
-
+		
 		// Gaming (Priority 5-4)
+		{Title: "Git", Priority: 5, URL: "https://wiki.archlinux.org/title/Git"},
+		{Title: "Programming_languages", Priority: 4, URL: "https://wiki.archlinux.org/title/List_of_applications#Programming_languages"},
 		{Title: "Steam", Priority: 5, URL: "https://wiki.archlinux.org/title/Steam"},
 		{Title: "Steam_troubleshooting", Priority: 5, URL: "https://wiki.archlinux.org/title/Steam/Troubleshooting"},
 		{Title: "Gaming", Priority: 4, URL: "https://wiki.archlinux.org/title/Gaming"},
