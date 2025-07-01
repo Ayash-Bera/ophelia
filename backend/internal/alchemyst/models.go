@@ -16,10 +16,10 @@ type AddContextRequest struct {
 
 type Document struct {
 	Content      string `json:"content"`
-	FileName     string `json:"fileName,omitempty"`
-	FileType     string `json:"fileType,omitempty"`
-	FileSize     int64  `json:"fileSize,omitempty"`
-	LastModified string `json:"lastModified,omitempty"`
+	FileName     string `json:"fileName"`
+	FileType     string `json:"fileType"`
+	FileSize     int64  `json:"fileSize"`
+	LastModified string `json:"lastModified"`
 }
 
 type SearchRequest struct {

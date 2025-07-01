@@ -3,6 +3,7 @@ module github.com/Ayash-Bera/ophelia/backend
 go 1.24.4
 
 require (
+	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gocolly/colly/v2 v2.1.0
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/antchfx/htmlquery v1.3.0 // indirect
 	github.com/antchfx/xmlquery v1.3.18 // indirect

@@ -59,6 +59,13 @@ func (c *Client) makeRequest(method, endpoint string, payload interface{}, resul
 			return fmt.Errorf("failed to marshal payload: %w", err)
 		}
 		body = bytes.NewBuffer(jsonData)
+		
+		// Debug: Log the JSON payload
+		c.logger.WithFields(logrus.Fields{
+			"method":       method,
+			"url":          url,
+			"payload_json": string(jsonData),
+		}).Debug("Request payload")
 	}
 
 	req, err := http.NewRequest(method, url, body)
@@ -87,9 +94,10 @@ func (c *Client) makeRequest(method, endpoint string, payload interface{}, resul
 	}
 
 	c.logger.WithFields(logrus.Fields{
-		"status_code": resp.StatusCode,
-		"method":      method,
-		"url":         url,
+		"status_code":   resp.StatusCode,
+		"method":        method,
+		"url":           url,
+		"response_body": string(responseBody),
 	}).Debug("Alchemyst API response received")
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
