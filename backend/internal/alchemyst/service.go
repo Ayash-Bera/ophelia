@@ -86,8 +86,8 @@ func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]S
 		return nil, err
 	}
 
-	s.logger.WithField("results_count", len(response.Results)).Info("Alchemyst API response")
-	return response.Results, nil
+	s.logger.WithField("results_count", len(response.Contexts.Contexts)).Info("Alchemyst API response")
+	return response.Contexts.Contexts, nil
 }
 
 func (s *Service) DeleteWikiContent(ctx context.Context, title string) error {

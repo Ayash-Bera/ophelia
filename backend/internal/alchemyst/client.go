@@ -35,7 +35,7 @@ func (c *Client) AddContext(req AddContextRequest) error {
 
 func (c *Client) SearchContext(req SearchRequest) (*SearchResponse, error) {
 	var response SearchResponse
-	err := c.makeRequest("POST", "/search", req, &response)
+	err := c.makeRequest("POST", "/search?mode=standard", req, &response)
 	return &response, err
 }
 
@@ -51,10 +51,10 @@ func (c *Client) ViewContext() (*ViewContextResponse, error) {
 
 func (c *Client) makeRequest(method, endpoint string, payload interface{}, result interface{}) error {
 	url := c.baseURL + endpoint
-	
+
 	var body io.Reader
 	var contentLength int
-	
+
 	if payload != nil {
 		jsonData, err := json.Marshal(payload)
 		if err != nil {
@@ -62,14 +62,14 @@ func (c *Client) makeRequest(method, endpoint string, payload interface{}, resul
 		}
 		body = bytes.NewBuffer(jsonData)
 		contentLength = len(jsonData)
-		
+
 		// Log payload size for debugging
 		c.logger.WithFields(logrus.Fields{
-			"method":         method,
-			"url":            url,
-			"payload_size":   contentLength,
+			"method":       method,
+			"url":          url,
+			"payload_size": contentLength,
 		}).Debug("Request payload info")
-		
+
 		// Only log full payload for small requests to avoid spam
 		if contentLength < 1000 {
 			c.logger.WithFields(logrus.Fields{
@@ -102,6 +102,10 @@ func (c *Client) makeRequest(method, endpoint string, payload interface{}, resul
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
+
+	// if endpoint == "/search?mode=standard" {
+	// 	c.logger.WithField("raw_response", string(responseBody)).Info("Raw search response")
+	// }
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}

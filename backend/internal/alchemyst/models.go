@@ -21,6 +21,11 @@ type Document struct {
 	FileSize     int64  `json:"fileSize"`
 	LastModified string `json:"lastModified"`
 }
+type SearchResponse struct {
+	Contexts struct {
+		Contexts []SearchResult `json:"contexts"`
+	} `json:"contexts"`
+}
 
 type SearchRequest struct {
 	UserID                     string      `json:"user_id,omitempty"`
@@ -40,13 +45,21 @@ type DeleteContextRequest struct {
 }
 
 // Response models
-type SearchResponse struct {
-	Results []SearchResult `json:"results"`
-}
 
 type SearchResult struct {
-	ContextID   string `json:"contextId"`
-	ContextData string `json:"contextData"`
+    ID struct {
+        OID string `json:"$oid"`
+    } `json:"_id"`
+    Content      string  `json:"content"`
+    Text         string  `json:"text"`
+    Score        float64 `json:"score"`
+    Metadata     struct {
+        FileName string `json:"file_name"`
+        DocType  string `json:"doc_type"`
+    } `json:"metadata"`
+    // Map to old field names for compatibility
+    ContextID   string `json:"-"`
+    ContextData string `json:"-"`
 }
 
 type ViewContextResponse struct {
@@ -54,28 +67,28 @@ type ViewContextResponse struct {
 }
 
 type ContextItem struct {
-	ID                      string      `json:"_id"`
-	UserID                  string      `json:"user_id"`
-	OrganizationID          *string     `json:"organization_id"`
-	ParentContextNodes      []string    `json:"parent_context_nodes"`
-	ChildrenContextNodes    []string    `json:"children_context_nodes"`
-	ContextType             string      `json:"context_type"`
-	Tags                    []string    `json:"tags"`
-	Source                  string      `json:"source"`
-	Content                 interface{} `json:"content"`
-	Blob                    interface{} `json:"blob"`
-	Indexed                 bool        `json:"indexed"`
-	Indexable               bool        `json:"indexable"`
-	GoverningPolicies       interface{} `json:"governing_policies"`
-	OverridePolicy          bool        `json:"override_policy"`
-	TelemetryData           interface{} `json:"telemetry_data"`
-	CreatedAt               time.Time   `json:"createdAt"`
-	UpdatedAt               time.Time   `json:"updatedAt"`
-	Scopes                  []string    `json:"scopes"`
-	Metadata                Metadata    `json:"metadata"`
-	CorrespondingVectorID   string      `json:"corresponding_vector_id"`
-	Text                    string      `json:"text"`
-	Score                   float64     `json:"score"`
+	ID                    string      `json:"_id"`
+	UserID                string      `json:"user_id"`
+	OrganizationID        *string     `json:"organization_id"`
+	ParentContextNodes    []string    `json:"parent_context_nodes"`
+	ChildrenContextNodes  []string    `json:"children_context_nodes"`
+	ContextType           string      `json:"context_type"`
+	Tags                  []string    `json:"tags"`
+	Source                string      `json:"source"`
+	Content               interface{} `json:"content"`
+	Blob                  interface{} `json:"blob"`
+	Indexed               bool        `json:"indexed"`
+	Indexable             bool        `json:"indexable"`
+	GoverningPolicies     interface{} `json:"governing_policies"`
+	OverridePolicy        bool        `json:"override_policy"`
+	TelemetryData         interface{} `json:"telemetry_data"`
+	CreatedAt             time.Time   `json:"createdAt"`
+	UpdatedAt             time.Time   `json:"updatedAt"`
+	Scopes                []string    `json:"scopes"`
+	Metadata              Metadata    `json:"metadata"`
+	CorrespondingVectorID string      `json:"corresponding_vector_id"`
+	Text                  string      `json:"text"`
+	Score                 float64     `json:"score"`
 }
 
 type Metadata struct {

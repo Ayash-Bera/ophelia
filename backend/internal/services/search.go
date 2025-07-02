@@ -147,25 +147,19 @@ func (s *SearchService) isTechnicalTerm(word string) bool {
 
 // convertAlchemystResults converts Alchemyst results to our SearchResult format
 func (s *SearchService) convertAlchemystResults(alchemystResults []alchemyst.SearchResult) []models.SearchResult {
-	var results []models.SearchResult
-
-	for _, result := range alchemystResults {
-		// Extract metadata from context data
-		title, content, wikiURL := s.parseContextData(result.ContextData, result.ContextID)
-
-		searchResult := models.SearchResult{
-			ContextID: result.ContextID,
-			Title:     title,
-			Content:   content,
-			URL:       wikiURL,
-			Score:     s.calculateRelevanceScore(result.ContextData),
-			Relevance: s.determineRelevance(s.calculateRelevanceScore(result.ContextData)),
-		}
-
-		results = append(results, searchResult)
-	}
-
-	return results
+    var results []models.SearchResult
+    for _, result := range alchemystResults {
+        searchResult := models.SearchResult{
+            ContextID: result.ID.OID,
+            Title:     result.Metadata.FileName,
+            Content:   result.Text,
+            URL:       fmt.Sprintf("https://wiki.archlinux.org/title/%s", strings.TrimSuffix(result.Metadata.FileName, ".txt")),
+            Score:     result.Score,
+            Relevance: s.determineRelevance(result.Score),
+        }
+        results = append(results, searchResult)
+    }
+    return results
 }
 
 // parseContextData extracts title, content, and URL from Alchemyst context data
