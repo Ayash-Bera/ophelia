@@ -24,24 +24,24 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	contentSize := int64(len(content))
 	now := time.Now()
 	timestamp := now.Format("20060102-150405")
-	
+
 	// Use unique filename with timestamp + random component
 	fileName := fmt.Sprintf("%s-%s-%d.txt", title, timestamp, now.UnixNano()%1000)
-	
+
 	// Simple deletion attempt (don't fail if it doesn't work)
 	source := fmt.Sprintf("arch-wiki/%s", title)
 	deleteReq := DeleteContextRequest{
 		Source: source,
 		ByDoc:  true,
 	}
-	
+
 	if err := s.client.DeleteContext(deleteReq); err != nil {
 		s.logger.WithError(err).Debug("Delete failed, continuing with unique filename")
 	} else {
 		// Wait briefly for deletion to propagate
 		time.Sleep(3 * time.Second)
 	}
-	
+
 	req := AddContextRequest{
 		Documents: []Document{{
 			Content:      content,
@@ -65,26 +65,28 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	return s.client.AddContextWithRetry(ctx, req)
 }
 
-
 func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]SearchResult, error) {
 	req := SearchRequest{
 		Query:                      errorQuery,
 		SimilarityThreshold:        0.7,
 		MinimumSimilarityThreshold: 0.3,
 		Scope:                      "internal",
-		// Remove metadata - match your working curl exactly
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"query": errorQuery,
-		"scope": req.Scope,
-	}).Debug("Searching Alchemyst context")
+		"query":                errorQuery,
+		"similarity_threshold": req.SimilarityThreshold,
+		"min_threshold":        req.MinimumSimilarityThreshold,
+		"scope":                req.Scope,
+	}).Info("Calling Alchemyst API")
 
 	response, err := s.client.SearchContextWithRetry(ctx, req)
 	if err != nil {
+		s.logger.WithError(err).Error("Alchemyst API call failed")
 		return nil, err
 	}
 
+	s.logger.WithField("results_count", len(response.Results)).Info("Alchemyst API response")
 	return response.Results, nil
 }
 

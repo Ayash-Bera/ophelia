@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ayash-Bera/ophelia/backend/internal/alchemyst"
+	// "github.com/Ayash-Bera/ophelia/backend/internal/api/handlers"
 	"github.com/Ayash-Bera/ophelia/backend/internal/api/handlers"
 	"github.com/Ayash-Bera/ophelia/backend/internal/config"
 	"github.com/Ayash-Bera/ophelia/backend/internal/database"
@@ -18,11 +19,11 @@ import (
 	"github.com/Ayash-Bera/ophelia/backend/internal/middleware"
 	"github.com/Ayash-Bera/ophelia/backend/internal/migration"
 	"github.com/Ayash-Bera/ophelia/backend/internal/repository"
+
 	"github.com/Ayash-Bera/ophelia/backend/internal/services"
 	"github.com/Ayash-Bera/ophelia/backend/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	// "github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -161,30 +162,17 @@ func main() {
 			// Simple analytics endpoint
 			recentQueries, err := repoManager.SearchQuery.GetRecentSearches(10)
 			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get analytics", err)
+				logger.WithError(err).Error("Failed to get recent searches")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve analytics"})
 				return
 			}
 
-			popularQueries, err := repoManager.PopularQuery.GetTop(10)
-			if err != nil {
-				utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get popular queries", err)
-				return
-			}
-
-			analytics := map[string]interface{}{
-				"recent_queries":  recentQueries,
-				"popular_queries": popularQueries,
-			}
-
-			utils.SuccessResponse(c, http.StatusOK, "Analytics retrieved", analytics)
+			c.JSON(http.StatusOK, gin.H{
+				"recent_queries": recentQueries,
+				"server_time":    time.Now(),
+			})
 		})
 	}
-
-	// Start periodic health checks
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go healthChecker.PeriodicHealthCheck(ctx, 30*time.Second)
 
 	// Start server
 	port := cfg.Server.Port
@@ -193,36 +181,36 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: router,
+		Addr:           ":" + port,
+		Handler:        router,
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   30 * time.Second,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
 
-	// Graceful shutdown
+	// Start server in a goroutine
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-
-		logger.Info("Shutting down server...")
-
-		// Cancel health check context
-		cancel()
-
-		// Shutdown server with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
-			logger.WithError(err).Error("Server forced to shutdown")
+		logger.WithField("port", port).Info("Starting HTTP server")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Fatal("Failed to start server")
 		}
 	}()
 
-	logger.WithField("port", port).Info("Server starting...")
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-	// Start server
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.WithError(err).Fatal("Failed to start server")
+	logger.Info("Shutting down server...")
+
+	// Give outstanding requests 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.WithError(err).Fatal("Server forced to shutdown")
 	}
 
-	logger.Info("Server stopped")
+	logger.Info("Server exited gracefully")
 }
