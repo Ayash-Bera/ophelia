@@ -65,16 +65,14 @@ func (s *Service) AddWikiContent(ctx context.Context, title, content, url string
 	return s.client.AddContextWithRetry(ctx, req)
 }
 
+
 func (s *Service) SearchForSolution(ctx context.Context, errorQuery string) ([]SearchResult, error) {
 	req := SearchRequest{
 		Query:                      errorQuery,
-		SimilarityThreshold:        0.8,
+		SimilarityThreshold:        0.7,
 		MinimumSimilarityThreshold: 0.3,
 		Scope:                      "internal",
-		Metadata: map[string]interface{}{
-			"search_type": "error_query",
-			"source":      "arch_search_system",
-		},
+		// Remove metadata - match your working curl exactly
 	}
 
 	s.logger.WithFields(logrus.Fields{
