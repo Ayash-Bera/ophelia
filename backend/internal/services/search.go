@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/Ayash-Bera/ophelia/backend/internal/alchemyst"
@@ -20,6 +19,13 @@ type SearchService struct {
 	repoManager      *repository.RepositoryManager
 	logger           *logrus.Logger
 }
+
+var (
+	// Compiled regex patterns for better performance
+	timestampPattern  = regexp.MustCompile(`-\d{8}-\d{6}-\d+$`)
+	simplePattern     = regexp.MustCompile(`-\d+-\d+$`)
+	digitsOnlyPattern = regexp.MustCompile(`^\d+$`)
+)
 
 func NewSearchService(
 	alchemystService *alchemyst.Service,
@@ -52,24 +58,20 @@ func (s *SearchService) SearchForSolution(ctx context.Context, errorQuery string
 	// Convert and enhance results
 	searchResults := s.convertAlchemystResults(alchemystResults)
 
-	// In SearchForSolution, add these logs:
 	s.logger.WithField("original_query", errorQuery).Info("Original query")
 	s.logger.WithField("processed_query", processedQuery).Info("Processed query")
 	s.logger.WithField("alchemyst_raw_count", len(alchemystResults)).Info("Raw Alchemyst results")
 	s.logger.WithField("converted_count", len(searchResults)).Info("After conversion")
 
-	// Filter and rank results
-	// filteredResults := s.filterAndRankResults(searchResults, errorQuery)
-	filteredResults := searchResults // Skip filtering temporarily
-
+	// TODO: Add result filtering and ranking in future iterations
 	// Limit results to top 10
-	if len(filteredResults) > 10 {
-		filteredResults = filteredResults[:10]
+	if len(searchResults) > 10 {
+		searchResults = searchResults[:10]
 	}
 
-	s.logger.WithField("final_results", len(filteredResults)).Debug("Search completed")
+	s.logger.WithField("final_results", len(searchResults)).Debug("Search completed")
 
-	return filteredResults, nil
+	return searchResults, nil
 }
 
 // preprocessQuery cleans and enhances the search query
@@ -83,157 +85,96 @@ func (s *SearchService) preprocessQuery(query string) string {
 	}
 
 	words := strings.Fields(strings.ToLower(query))
-	var filtered []string
+	var filteredWords []string
 
 	for _, word := range words {
-		// Remove punctuation except for useful characters in error messages
-		cleaned := regexp.MustCompile(`[^\w\-\.\/\:]`).ReplaceAllString(word, "")
-		if cleaned == "" {
-			continue
-		}
-
-		// Keep the word if it's not a noise word or if it looks like an error code/command
-		isNoiseWord := false
-		for _, noise := range noiseWords {
-			if cleaned == noise {
-				isNoiseWord = true
-				break
-			}
-		}
-
-		// Keep technical terms, error codes, and command names
-		if !isNoiseWord || s.isTechnicalTerm(cleaned) {
-			filtered = append(filtered, cleaned)
+		word = strings.TrimSpace(word)
+		if len(word) > 2 && !s.contains(noiseWords, word) {
+			filteredWords = append(filteredWords, word)
 		}
 	}
 
-	result := strings.Join(filtered, " ")
-	s.logger.WithFields(logrus.Fields{
-		"original":  query,
-		"processed": result,
-	}).Debug("Query preprocessed")
+	processed := strings.Join(filteredWords, " ")
 
-	return result
+	// If filtering removed too much, use original
+	if len(processed) < len(query)/3 {
+		return query
+	}
+
+	return processed
 }
 
-// isTechnicalTerm checks if a word is likely a technical term worth keeping
-func (s *SearchService) isTechnicalTerm(word string) bool {
-	// Common technical patterns in Arch Linux
-	technicalPatterns := []string{
-		"pacman", "systemd", "grub", "xorg", "wayland", "networkmanager",
-		"bluetooth", "audio", "pulseaudio", "alsa", "nvidia", "amd",
-		"kernel", "module", "service", "unit", "mount", "fstab",
-		"aur", "makepkg", "pkgbuild", "dependency", "conflict",
-	}
-
-	for _, pattern := range technicalPatterns {
-		if strings.Contains(word, pattern) {
+// contains checks if a slice contains a string
+func (s *SearchService) contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
 			return true
 		}
 	}
-
-	// Check for error code patterns (numbers, version numbers, etc.)
-	if matched, _ := regexp.MatchString(`\d`, word); matched {
-		return true
-	}
-
-	// Check for command-like patterns
-	if matched, _ := regexp.MatchString(`^[a-z]+(-[a-z]+)*$`, word); matched && len(word) > 2 {
-		return true
-	}
-
 	return false
 }
 
 // convertAlchemystResults converts Alchemyst results to our SearchResult format
 func (s *SearchService) convertAlchemystResults(alchemystResults []alchemyst.SearchResult) []models.SearchResult {
-    var results []models.SearchResult
-    for _, result := range alchemystResults {
-        searchResult := models.SearchResult{
-            ContextID: result.ID.OID,
-            Title:     result.Metadata.FileName,
-            Content:   result.Text,
-            URL:       fmt.Sprintf("https://wiki.archlinux.org/title/%s", strings.TrimSuffix(result.Metadata.FileName, ".txt")),
-            Score:     result.Score,
-            Relevance: s.determineRelevance(result.Score),
-        }
-        results = append(results, searchResult)
-    }
-    return results
+	var results []models.SearchResult
+	for _, result := range alchemystResults {
+		// Extract page name from filename (format: "PageName-timestamp-random.txt")
+		pageName := s.extractPageNameFromFilename(result.Metadata.FileName)
+
+		title := fmt.Sprintf("Arch Wiki - %s", strings.ReplaceAll(pageName, "_", " "))
+		wikiURL := fmt.Sprintf("https://wiki.archlinux.org/title/%s", url.QueryEscape(pageName))
+
+		searchResult := models.SearchResult{
+			ContextID: result.ID.OID,
+			Title:     title,
+			Content:   result.Text,
+			URL:       wikiURL,
+			Score:     result.Score,
+			Relevance: s.determineRelevance(result.Score),
+		}
+		results = append(results, searchResult)
+	}
+	return results
 }
 
-// parseContextData extracts title, content, and URL from Alchemyst context data
-func (s *SearchService) parseContextData(contextData, contextID string) (title, content, wikiURL string) {
-	// Try to extract wiki page title from context ID or data
-	if strings.Contains(contextID, "arch-wiki/") {
-		title = strings.TrimPrefix(contextID, "arch-wiki/")
-		title = strings.ReplaceAll(title, "_", " ")
-	} else {
-		title = "Arch Linux Documentation"
+// extractPageNameFromFilename extracts the page name from Alchemyst filename
+// Format: "PageName-timestamp-random.txt" -> "PageName"
+func (s *SearchService) extractPageNameFromFilename(filename string) string {
+	// Remove .txt extension
+	filename = strings.TrimSuffix(filename, ".txt")
+
+	// Remove timestamp and random number suffix using compiled regex
+	pageName := timestampPattern.ReplaceAllString(filename, "")
+
+	// If no timestamp pattern found, try simpler patterns
+	if pageName == filename {
+		// Try to remove any trailing -numbers-numbers pattern
+		pageName = simplePattern.ReplaceAllString(filename, "")
 	}
 
-	// Clean and truncate content
-	content = strings.TrimSpace(contextData)
-	if len(content) > 500 {
-		content = content[:500] + "..."
-	}
-
-	// Generate wiki URL
-	if strings.Contains(contextID, "arch-wiki/") {
-		pageName := strings.TrimPrefix(contextID, "arch-wiki/")
-		wikiURL = fmt.Sprintf("https://wiki.archlinux.org/title/%s", url.QueryEscape(pageName))
-	} else {
-		wikiURL = "https://wiki.archlinux.org/"
-	}
-
-	return title, content, wikiURL
-}
-
-// calculateRelevanceScore calculates a relevance score for the result
-func (s *SearchService) calculateRelevanceScore(contextData string) float64 {
-	score := 0.5 // Base score
-
-	contextLower := strings.ToLower(contextData)
-
-	// Boost score for error-related content
-	errorTerms := []string{
-		"error", "failed", "failure", "problem", "issue", "trouble",
-		"cannot", "can't", "unable", "not working", "broken",
-		"fix", "solve", "solution", "troubleshoot", "debug",
-	}
-
-	for _, term := range errorTerms {
-		if strings.Contains(contextLower, term) {
-			score += 0.1
+	// If still no change, try to remove just the last timestamp-like component
+	if pageName == filename {
+		parts := strings.Split(filename, "-")
+		if len(parts) > 2 {
+			// Keep everything except the last 2-3 parts which might be timestamp
+			for i := len(parts) - 1; i >= 0; i-- {
+				if digitsOnlyPattern.MatchString(parts[i]) {
+					// This part is all digits, likely part of timestamp
+					parts = parts[:i]
+				} else {
+					break
+				}
+			}
+			pageName = strings.Join(parts, "-")
 		}
 	}
 
-	// Boost score for solution-related content
-	solutionTerms := []string{
-		"install", "configure", "setup", "enable", "disable",
-		"restart", "reload", "update", "upgrade", "downgrade",
-		"edit", "modify", "change", "add", "remove",
+	// Fallback - if we couldn't extract properly, return the original without .txt
+	if pageName == "" {
+		pageName = strings.TrimSuffix(filename, ".txt")
 	}
 
-	for _, term := range solutionTerms {
-		if strings.Contains(contextLower, term) {
-			score += 0.1
-		}
-	}
-
-	// Boost score for command-related content
-	if strings.Contains(contextLower, "sudo") ||
-		strings.Contains(contextLower, "pacman") ||
-		strings.Contains(contextLower, "systemctl") {
-		score += 0.2
-	}
-
-	// Cap the score at 1.0
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	return score
+	return pageName
 }
 
 // determineRelevance converts numeric score to text relevance
@@ -245,68 +186,4 @@ func (s *SearchService) determineRelevance(score float64) string {
 	} else {
 		return "low"
 	}
-}
-
-// filterAndRankResults filters out low-quality results and ranks by relevance
-func (s *SearchService) filterAndRankResults(results []models.SearchResult, originalQuery string) []models.SearchResult {
-	var filtered []models.SearchResult
-
-	// Filter out results that are too short or seem irrelevant
-	for _, result := range results {
-		if len(result.Content) < 50 {
-			continue // Skip very short results
-		}
-
-		if result.Score < 0.3 {
-			continue // Skip low-relevance results
-		}
-
-		// Check if result contains keywords from original query
-		if s.containsQueryKeywords(result, originalQuery) {
-			filtered = append(filtered, result)
-		}
-	}
-
-	// Sort by score (descending)
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].Score > filtered[j].Score
-	})
-
-	return filtered
-}
-
-// containsQueryKeywords checks if the result contains important keywords from the query
-func (s *SearchService) containsQueryKeywords(result models.SearchResult, query string) bool {
-	// Extract important words from query (skip common words)
-	queryWords := s.extractImportantWords(query)
-	if len(queryWords) == 0 {
-		return true // If no important words, include the result
-	}
-
-	resultText := strings.ToLower(result.Title + " " + result.Content)
-
-	// Check if at least one important word appears in the result
-	for _, word := range queryWords {
-		if strings.Contains(resultText, strings.ToLower(word)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// extractImportantWords extracts important words from a query
-func (s *SearchService) extractImportantWords(query string) []string {
-	// Split into words and filter
-	words := regexp.MustCompile(`\W+`).Split(query, -1)
-	var important []string
-
-	for _, word := range words {
-		word = strings.TrimSpace(strings.ToLower(word))
-		if len(word) > 2 && s.isTechnicalTerm(word) {
-			important = append(important, word)
-		}
-	}
-
-	return important
 }
